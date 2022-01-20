@@ -43,7 +43,7 @@ gamma = [0.5,0.5,0.5]
 # name of the final image
 final_file = "final.tiff"
 
-# save aligned nibary files?
+# save aligned nibary files or not. Note that for multiprocessing, this must be True
 save_aligned_binary = True
 
 # save aligned images?
@@ -71,6 +71,7 @@ def align_frames(i):
     tst = time.time()
     # read the raw data as an object, obtain the image and compute its fft
     frame = np.fromfile(file_swp[i], dtype='uint16').reshape(n1, n2)
+    os.remove(file_swp[i])
     frame_fft = fft.fft2(np.float32(frame))
     # compute the frame offset
     cache = np.abs(fft.ifft2(ref_fft*frame_fft))
@@ -81,7 +82,6 @@ def align_frames(i):
     s2 = s2 - np.mod(s2, 2)
     # fix the offset and save into the result array
     frame = np.roll(frame, (s1, s2), axis=(0,1))
-    # frames_aligned[i,:,:] = frame
     # save the aligned images and binaries if necessary
     if save_aligned_binary is True:
         frame.tofile(file_bin[i])
@@ -124,7 +124,7 @@ for file in os.listdir():
         file_swp.append(os.path.splitext(file)[0] + '_aligned.swp')
         file_bin.append(os.path.splitext(file)[0] + '_aligned.bin')
         file_tif.append(os.path.splitext(file)[0] + '_aligned.tif')
-n_files = len(file_lst)
+n_files = np.int64(len(file_lst))
 if nproc > n_files:
     nproc = n_files
 
@@ -134,8 +134,8 @@ if nproc > n_files:
 ref_raw = rawpy.imread(file_lst[reference_frame])
 dummy = rawpy.imread(file_lst[reference_frame])
 ref_frame = ref_raw.raw_image
-n1 = np.shape(ref_frame)[0]
-n2 = np.shape(ref_frame)[1]
+n1 = np.int64(np.shape(ref_frame)[0])
+n2 = np.int64(np.shape(ref_frame)[1])
 ref_fft = np.conjugate(fft.fft2(np.float32(ref_frame)))
 
 
@@ -168,9 +168,18 @@ if __name__ == '__main__':
     tst = time.time()
     for i in range(0, n_files):
         frames_aligned[i,:,:] = frames_aligned[i,:,:] - np.median(frames_aligned[i,:,:])
+
     frames_aligned = frames_aligned.reshape(n_files, n1*n2)
     cov = np.dot(frames_aligned, frames_aligned.transpose())
-    w = np.sum(cov, axis=1)/np.diag(cov) - 1.
+    aa = np.diag(cov)
+    bb = np.sum(cov, axis=1)
+    w = bb/aa - 1
+    print(np.amin(bb), np.shape(bb), bb.dtype)
+    print(np.amin(aa), np.shape(aa), aa.dtype)
+    print("----")
+    print(aa)
+    print("----")
+    # w = np.sum(cov, axis=1)/np.diag(cov) - 1
 
     # exclude the low quality frames
     n_bad = int(n_files*bad_fraction)
@@ -178,6 +187,7 @@ if __name__ == '__main__':
     if thr < 0: thr = 0
     w = np.where(w <= thr, 0, w)
     w = w / np.sum(w)
+    print(w)
 
     # stack the frames with weights.
     # note that we must normalize the stacked result.
@@ -187,7 +197,7 @@ if __name__ == '__main__':
     cache = (frame_stacked-fmin)/(fmax-fmin)
     tmax = 2.**(adc_digit_max) - 1
     frame_stacked = np.floor(cache*tmax)
-    print("Weights computed and %i/%i best frames used for stacking. Time cost: %f6.2" 
+    print("Weights computed and %i/%i best frames used for stacking. Time cost: %6.2f" 
         %(n_files-n_bad, n_files, time.time()-tst))
 
 
