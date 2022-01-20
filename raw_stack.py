@@ -133,7 +133,7 @@ ref_fft = np.conjugate(fft.fft2(np.float32(ref_frame)))
 
 
 # use multiprocessing to work on multiple files' alignment.
-frames_aligned = np.zeros([n_files, n1, n2], dtype=np.float32)
+frames_aligned = np.zeros([n_files, n1, n2], dtype=np.float64)
 
 if __name__ == '__main__':
     tst = time.time()
@@ -162,7 +162,7 @@ if __name__ == '__main__':
         frames_aligned[i,:,:] = frames_aligned[i,:,:] - np.median(frames_aligned[i,:,:])
     frames_aligned = frames_aligned.reshape(n_files, n1*n2)
     cov = np.dot(frames_aligned, frames_aligned.transpose())
-    w = np.sum(cov, axis=1)/np.diag(cov) - 1
+    w = np.sum(cov, axis=1)/np.diag(cov) - 1.
 
     # exclude the low quality frames
     n_bad = int(n_files*bad_fraction)
@@ -176,8 +176,10 @@ if __name__ == '__main__':
     frame_stacked = np.dot(w, frames_aligned).reshape(n1, n2)
     fmin = np.amin(frame_stacked)
     fmax = np.amax(frame_stacked)
-    frame_stacked = np.round((frame_stacked-fmin)/(fmax-fmin)*2**adc_digit)
-    print(np.shape(ref_raw.raw_image), np.amin(ref_raw.raw_image), np.amax(ref_raw.raw_image))
+    cache = (frame_stacked-fmin)/(fmax-fmin)
+    tmax = 2.**adc_digit
+    frame_stacked = np.round(cache*tmax)
+    print(np.shape(frame_stacked), np.amin(frame_stacked), np.amax(frame_stacked))
     print("Weights computed and %i/%i best frames used for stacking. Time cost: %f6.2" 
         %(n_files-n_bad, n_files, time.time()-tst))
 
