@@ -36,10 +36,10 @@ dark_frac = 5e-4
 bright_frac = 5e-4
 
 # The red, green and blue pixels are amplified by this factor for a custom white balance.
-color_enhance_fac = [1.05, 1.00, 1.00]
+color_enhance_fac = [1.10, 0.85, 1.10]
 
 # final gamma
-gamma = 0.5
+gamma = [0.3,0.5,0.3]
 
 # name of the final image
 final_file = working_dir + "/final.tiff"
@@ -61,10 +61,7 @@ adc_digit = 14
 def align_frames(i):
     tst = time.time()
     # read the raw data as an object, obtain the image and compute its fft
-    file = file_list[i]
-    file_bin = os.path.splitext(file)[0] + '_aligned.bin'
-    file_tif = os.path.splitext(file)[0] + '_aligned.tif'
-    raw = rawpy.imread(file)
+    raw = rawpy.imread(file_lst[i])
     frame = raw.raw_image
     frame_fft = fft.fft2(np.float32(frame))
     # compute the frame offset
@@ -79,11 +76,11 @@ def align_frames(i):
     frames_aligned[i,:,:] = frame
     # save the aligned images and binaries if necessary
     if save_aligned_binary is True:
-        frame.tofile(file_bin)
+        frame.tofile(file_bin[i])
     if save_aligned_image is True:
         raw.raw_image[:,:] = frame
         rgb = raw.postprocess(use_camera_wb=True)
-        imageio.imsave(file_tif, rgb)
+        imageio.imsave(file_tif[i], rgb)
     print("File %6i aligned with shifts sx=%8i, sy=%8i in %8.2f sec." %(i, s1, s2, time.time()-tst))
     return 1
 
@@ -104,7 +101,7 @@ def adjust_color(i, samp):
     val = (samp-d1)/(d2-d1)
     val = np.where(val<0, 0, val)
     val = np.where(val>1, 1, val)
-    samp = (val**gamma)*256*color_enhance_fac[i]
+    samp = (val**gamma[i])*256*color_enhance_fac[i]
     samp = np.where(samp<  0,   0, samp)
     samp = np.where(samp>255, 255, samp)
     return samp.reshape(m1, m2)
@@ -113,18 +110,21 @@ def adjust_color(i, samp):
 
 # make a list of woking files
 os.chdir(working_dir)
-file_list = []
+file_lst, file_bin, file_tif = [], [], []
 for file in os.listdir():
     if file.endswith(extension):
-        file_list.append(file)
-n_files = len(file_list)
+        file_lst.append(file)
+        file_bin.append(os.path.splitext(file)[0] + '_aligned.bin')
+        file_tif.append(os.path.splitext(file)[0] + '_aligned.tif')
+n_files = len(file_lst)
 if nproc > n_files:
     nproc = n_files
 
 
 
 # prepare the reference frame in the Fourier domain
-ref_raw = rawpy.imread(file_list[reference_frame])
+ref_raw = rawpy.imread(file_lst[reference_frame])
+dummy = rawpy.imread(file_lst[reference_frame])
 ref_frame = ref_raw.raw_image
 n1 = np.shape(ref_frame)[0]
 n2 = np.shape(ref_frame)[1]
@@ -138,20 +138,18 @@ frames_aligned = np.zeros([n_files, n1, n2], dtype=np.float64)
 if __name__ == '__main__':
     tst = time.time()
 
-#     with Pool(processes=nproc) as pool:
-#         pool.map(align_frames, range(n_files))
+    with mp.Pool(processes=nproc) as pool:
+        pool.map(align_frames, range(n_files))
     
-    for i in range(n_files):
-        align_frames(i)
+    # for i in range(n_files):
+    #     align_frames(i)
 
     print("Alignment done. Time cost: %9.2f" %(time.time()-tst))
 
-    # # read the alignment results of multiple processes
-    # for i in range(n_files):
-    #     file = file_list[i]
-    #     base = os.path.splitext(file)[0]
-    #     frame = np.fromfile(base+'.bin',dtype='uint16')
-    #     frames_aligned[i,:,:] = frame.reshape(n1, n2)
+    # read the alignment results of multiple processes
+    for i in range(n_files):
+        frame = np.fromfile(file_bin[i],dtype='uint16')
+        frames_aligned[i,:,:] = frame.reshape(n1, n2)
 
 
 
@@ -179,7 +177,6 @@ if __name__ == '__main__':
     cache = (frame_stacked-fmin)/(fmax-fmin)
     tmax = 2.**adc_digit
     frame_stacked = np.round(cache*tmax)
-    print(np.shape(frame_stacked), np.amin(frame_stacked), np.amax(frame_stacked))
     print("Weights computed and %i/%i best frames used for stacking. Time cost: %f6.2" 
         %(n_files-n_bad, n_files, time.time()-tst))
 
@@ -190,9 +187,8 @@ if __name__ == '__main__':
     # note that "gamma=(1,1), no_auto_bright=True" means to get linear rgb
     # rememer to use output_bps=16 for 16-bit output depth
     print("Ready to adjust the colors:")
-    ref_raw.raw_image[:,:] = frame_stacked
-    print(np.shape(ref_raw.raw_image), np.amin(ref_raw.raw_image), np.amax(ref_raw.raw_image))
-    rgb = ref_raw.postprocess(gamma=(1,1), no_auto_bright=True, output_bps=16)
+    dummy.raw_image[:,:] = frame_stacked
+    rgb = dummy.postprocess(gamma=(1,1), no_auto_bright=True, output_bps=16)
     # note that the image size is different after converting from raw to rgb image
     m1, m2, npix = np.shape(rgb)[0], np.shape(rgb)[1], rgb.size
     tst = time.time()
