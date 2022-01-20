@@ -56,31 +56,40 @@ adc_digit_max = 16
 
 
 
+
+def raw_to_swp():
+    tst = time.time()
+    for i in range(n_files):
+        # read the raw data as an object, obtain the image and compute its fft
+        with rawpy.imread(file_lst[i]) as raw:
+            frame = raw.raw_image
+            frame.tofile(file_swp[i])
+
+
 # subroutine that aligns all frames to the reference frame
 def align_frames(i):
     tst = time.time()
     # read the raw data as an object, obtain the image and compute its fft
-    with rawpy.imread(file_lst[i]) as raw:
-        frame = raw.raw_image.copy()
-        frame_fft = fft.fft2(np.float32(frame))
-        # compute the frame offset
-        cache = np.abs(fft.ifft2(ref_fft*frame_fft))
-        index = np.unravel_index(np.argmax(cache, axis=None), cache.shape)
-        s1, s2 = -index[0], -index[1]
-        # make sure that the Bayer matrix will not be corrupted
-        s1 = s1 - np.mod(s1, 2)
-        s2 = s2 - np.mod(s2, 2)
-        # fix the offset and save into the result array
-        frame = np.roll(frame, (s1, s2), axis=(0,1))
-        # frames_aligned[i,:,:] = frame
-        # save the aligned images and binaries if necessary
-        if save_aligned_binary is True:
-            frame.tofile(file_bin[i])
-        if save_aligned_image is True:
-            raw.raw_image[:,:] = frame
-            rgb = raw.postprocess(use_camera_wb=True)
-            imageio.imsave(file_tif[i], rgb)
-        print("File %6i aligned with shifts sx=%8i, sy=%8i in %8.2f sec." %(i, s1, s2, time.time()-tst))
+    frame = np.fromfile(file_swp[i], dtype='uint16').reshape(n1, n2)
+    frame_fft = fft.fft2(np.float32(frame))
+    # compute the frame offset
+    cache = np.abs(fft.ifft2(ref_fft*frame_fft))
+    index = np.unravel_index(np.argmax(cache, axis=None), cache.shape)
+    s1, s2 = -index[0], -index[1]
+    # make sure that the Bayer matrix will not be corrupted
+    s1 = s1 - np.mod(s1, 2)
+    s2 = s2 - np.mod(s2, 2)
+    # fix the offset and save into the result array
+    frame = np.roll(frame, (s1, s2), axis=(0,1))
+    # frames_aligned[i,:,:] = frame
+    # save the aligned images and binaries if necessary
+    if save_aligned_binary is True:
+        frame.tofile(file_bin[i])
+    if save_aligned_image is True:
+        raw.raw_image[:,:] = frame
+        rgb = raw.postprocess(use_camera_wb=True)
+        imageio.imsave(file_tif[i], rgb)
+    print("Frame %6i (%s) aligned with shifts sx=%8i, sy=%8i in %8.2f sec." %(i, file_lst[i], s1, s2, time.time()-tst))
 
 
 
@@ -108,10 +117,11 @@ def adjust_color(i, samp):
 
 # make a list of woking files
 os.chdir(working_dir)
-file_lst, file_bin, file_tif = [], [], []
+file_lst, file_bin, file_swp, file_tif = [], [], [], []
 for file in os.listdir():
     if file.endswith(extension):
         file_lst.append(file)
+        file_swp.append(os.path.splitext(file)[0] + '_aligned.swp')
         file_bin.append(os.path.splitext(file)[0] + '_aligned.bin')
         file_tif.append(os.path.splitext(file)[0] + '_aligned.tif')
 n_files = len(file_lst)
@@ -135,6 +145,8 @@ frames_aligned = np.zeros([n_files, n1, n2], dtype=np.float64)
 
 if __name__ == '__main__':
     tst = time.time()
+
+    raw_to_swp()
     
     with mp.Pool(nproc) as pool:
         pool.map(align_frames, range(n_files))
