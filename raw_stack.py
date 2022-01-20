@@ -17,7 +17,6 @@ else:
     nproc = 4
 
 
-
 ##############################################################
 # stacking parameters
 # all raw files in the working directory will be read in and aligned to the reference frame.
@@ -36,22 +35,22 @@ dark_frac = 5e-4
 bright_frac = 5e-4
 
 # The red, green and blue pixels are amplified by this factor for a custom white balance.
-color_enhance_fac = [1.10, 0.85, 1.10]
+color_enhance_fac = [1.05, 0.90, 1.05]
 
 # final gamma
-gamma = [0.3,0.5,0.3]
+gamma = [0.5,0.5,0.5]
 
 # name of the final image
-final_file = working_dir + "/final.tiff"
+final_file = "final.tiff"
 
 # save aligned nibary files?
 save_aligned_binary = True
 
 # save aligned images?
-save_aligned_image = True
+save_aligned_image = False
 
-# number of ADC digit. The true maximum value shoule be 2**adc_digit
-adc_digit = 14
+# number of ADC digit. The true maximum value should be 2**adc_digit
+adc_digit_max = 16
 
 ##############################################################
 
@@ -61,28 +60,27 @@ adc_digit = 14
 def align_frames(i):
     tst = time.time()
     # read the raw data as an object, obtain the image and compute its fft
-    raw = rawpy.imread(file_lst[i])
-    frame = raw.raw_image
-    frame_fft = fft.fft2(np.float32(frame))
-    # compute the frame offset
-    cache = np.abs(fft.ifft2(ref_fft*frame_fft))
-    index = np.unravel_index(np.argmax(cache, axis=None), cache.shape)
-    s1, s2 = -index[0], -index[1]
-    # make sure that the Bayer matrix will not be corrupted
-    s1 = s1 - np.mod(s1, 2)
-    s2 = s2 - np.mod(s2, 2)
-    # fix the offset and save into the result array
-    frame = np.roll(frame, (s1, s2), axis=(0,1))
-    frames_aligned[i,:,:] = frame
-    # save the aligned images and binaries if necessary
-    if save_aligned_binary is True:
-        frame.tofile(file_bin[i])
-    if save_aligned_image is True:
-        raw.raw_image[:,:] = frame
-        rgb = raw.postprocess(use_camera_wb=True)
-        imageio.imsave(file_tif[i], rgb)
-    print("File %6i aligned with shifts sx=%8i, sy=%8i in %8.2f sec." %(i, s1, s2, time.time()-tst))
-    return 1
+    with rawpy.imread(file_lst[i]) as raw:
+        frame = raw.raw_image.copy()
+        frame_fft = fft.fft2(np.float32(frame))
+        # compute the frame offset
+        cache = np.abs(fft.ifft2(ref_fft*frame_fft))
+        index = np.unravel_index(np.argmax(cache, axis=None), cache.shape)
+        s1, s2 = -index[0], -index[1]
+        # make sure that the Bayer matrix will not be corrupted
+        s1 = s1 - np.mod(s1, 2)
+        s2 = s2 - np.mod(s2, 2)
+        # fix the offset and save into the result array
+        frame = np.roll(frame, (s1, s2), axis=(0,1))
+        # frames_aligned[i,:,:] = frame
+        # save the aligned images and binaries if necessary
+        if save_aligned_binary is True:
+            frame.tofile(file_bin[i])
+        if save_aligned_image is True:
+            raw.raw_image[:,:] = frame
+            rgb = raw.postprocess(use_camera_wb=True)
+            imageio.imsave(file_tif[i], rgb)
+        print("File %6i aligned with shifts sx=%8i, sy=%8i in %8.2f sec." %(i, s1, s2, time.time()-tst))
 
 
 
@@ -137,8 +135,8 @@ frames_aligned = np.zeros([n_files, n1, n2], dtype=np.float64)
 
 if __name__ == '__main__':
     tst = time.time()
-
-    with mp.Pool(processes=nproc) as pool:
+    
+    with mp.Pool(nproc) as pool:
         pool.map(align_frames, range(n_files))
     
     # for i in range(n_files):
@@ -175,8 +173,8 @@ if __name__ == '__main__':
     fmin = np.amin(frame_stacked)
     fmax = np.amax(frame_stacked)
     cache = (frame_stacked-fmin)/(fmax-fmin)
-    tmax = 2.**adc_digit
-    frame_stacked = np.round(cache*tmax)
+    tmax = 2.**(adc_digit_max) - 1
+    frame_stacked = np.floor(cache*tmax)
     print("Weights computed and %i/%i best frames used for stacking. Time cost: %f6.2" 
         %(n_files-n_bad, n_files, time.time()-tst))
 
