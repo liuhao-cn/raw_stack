@@ -1,2 +1,7 @@
 # raw_stack
-Stack the raw format astro-images with: 1, auto alignment. 2, selection based on cross-covariance with other frames. 3, Adjustment of the colors.
+
+Stack raw format astro-images with: 
+
+1) Auto alignment (currenty only horizontal and vertical shifts, no rotation correction yet). 
+2) Auto selection based on cross-covariance with other frames. 
+3) Adjustment of the colors.
