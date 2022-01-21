@@ -1,29 +1,31 @@
-# read camera raw files in a given folder and stack them.
-# example: python raw_stack.py 'e:/astro/temp/' 8
-#
+##############################################################
 import os, rawpy, imageio, time, sys
 import scipy.fft as fft
+import matplotlib.pyplot as plt
 import numpy as np
 import multiprocessing as mp
 
 
-
-# read working directory and number of processes from command line
-if len(sys.argv)>1 :
-    working_dir = sys.argv[1]
-    nproc = int(sys.argv[2])
-else:
-    working_dir = "./"
-    nproc = 4
+# ##############################################################
+# from IPython.core.display import display, HTML
+# display(HTML("<style>.container { width:90% !important; }</style>"))
 
 
 ##############################################################
-# stacking parameters
-# all raw files in the working directory will be read in and aligned to the reference frame.
+# working directory, all raw files in this directory will be processed
+working_dir = "./"
+
+# define the number of processes to be used
+nproc = 96
+
+# define the raw file extension
 extension = "CR3"
 
-# extension of the raw file
-reference_frame = 0
+# If true, do not report the alignment result
+less_report = True
+
+# the file of reference frames
+reference_file = 'IMG_0686.CR3'
 
 # fraction of frames that will not be used
 bad_fraction = 0.4
@@ -52,11 +54,8 @@ save_aligned_image = False
 # number of ADC digit. The true maximum value should be 2**adc_digit
 adc_digit_max = 16
 
+
 ##############################################################
-
-
-
-
 def raw_to_swp():
     tst = time.time()
     for i in range(n_files):
@@ -89,7 +88,10 @@ def align_frames(i):
         raw.raw_image[:,:] = frame
         rgb = raw.postprocess(use_camera_wb=True)
         imageio.imsave(file_tif[i], rgb)
-    print("Frame %6i (%s) aligned with shifts sx=%8i, sy=%8i in %8.2f sec." %(i, file_lst[i], s1, s2, time.time()-tst))
+    if not less_report:
+        print("\nFrame %6i (%s) aligned in %8.2f sec, (sx, sy) = (%8i,%8i)." 
+              %(i, file_lst[i], time.time()-tst, s1, s2))
+    return i, s1, s2
 
 
 
@@ -113,8 +115,6 @@ def adjust_color(i, samp):
     samp = np.where(samp>255, 255, samp)
     return samp.reshape(m1, m2)
 
-
-
 # make a list of woking files
 os.chdir(working_dir)
 file_lst, file_bin, file_swp, file_tif = [], [], [], []
@@ -131,8 +131,7 @@ if nproc > n_files:
 
 
 # prepare the reference frame in the Fourier domain
-ref_raw = rawpy.imread(file_lst[reference_frame])
-dummy = rawpy.imread(file_lst[reference_frame])
+ref_raw = rawpy.imread(reference_file)
 ref_frame = ref_raw.raw_image
 n1 = np.int64(np.shape(ref_frame)[0])
 n2 = np.int64(np.shape(ref_frame)[1])
@@ -149,7 +148,14 @@ if __name__ == '__main__':
     raw_to_swp()
     
     with mp.Pool(nproc) as pool:
-        pool.map(align_frames, range(n_files))
+        output = [pool.map(align_frames, range(n_files))]
+    
+    output_arr = np.array(output)
+    sx, sy = output_arr[0,:,1], output_arr[0,:,2]
+    sx = np.where(sx >  n1/2, sx-n1, sx)
+    sx = np.where(sx < -n1/2, sx+n1, sx)
+    sy = np.where(sy >  n2/2, sy-n2, sy)
+    sy = np.where(sy < -n2/2, sy+n2, sy)
     
     # for i in range(n_files):
     #     align_frames(i)
@@ -168,18 +174,17 @@ if __name__ == '__main__':
     tst = time.time()
     for i in range(0, n_files):
         frames_aligned[i,:,:] = frames_aligned[i,:,:] - np.median(frames_aligned[i,:,:])
-
+    
+    # compute the covariance matrix
     frames_aligned = frames_aligned.reshape(n_files, n1*n2)
     cov = np.dot(frames_aligned, frames_aligned.transpose())
-    aa = np.diag(cov)
-    bb = np.sum(cov, axis=1)
-    w = bb/aa - 1
-    print(np.amin(bb), np.shape(bb), bb.dtype)
-    print(np.amin(aa), np.shape(aa), aa.dtype)
-    print("----")
-    print(aa)
-    print("----")
-    # w = np.sum(cov, axis=1)/np.diag(cov) - 1
+    
+    # compute weights from the covariance matrix
+    aa = np.diag(cov)[0:n_files]
+    bb = np.sum(cov, axis=1)[0:n_files]
+    w = np.zeros(n_files)
+    for i in range(n_files):
+        w[i] = bb[i]/aa[i] - 1
 
     # exclude the low quality frames
     n_bad = int(n_files*bad_fraction)
@@ -187,7 +192,26 @@ if __name__ == '__main__':
     if thr < 0: thr = 0
     w = np.where(w <= thr, 0, w)
     w = w / np.sum(w)
-    print(w)
+    
+    # plot the weights for test 
+    plt.figure(figsize=(4,2),dpi=200)
+    plt.title(r'Stacking weights ($w\times N_{frames}$)')
+    plt.xlabel('Frame number',fontsize=9)
+    plt.ylabel(r'$w\times N_{frames}$',fontsize=9)
+    w1 = np.where(w==0, np.nan, w)
+    w2 = np.where(w==0, np.median(w), np.nan)
+    plt.plot(w1*n_files, marker="o", label='Valid')
+    plt.plot(w2*n_files, marker="*", label='Invaid')
+    plt.legend()
+    plt.savefig('weights.pdf')
+    
+    # plot the XY-shifts
+    plt.figure(figsize=(4,2),dpi=200)
+    plt.title('XY shifts in pixel')
+    plt.xlabel('Y shifts',fontsize=9)
+    plt.ylabel('X shifts',fontsize=9)
+    plt.scatter(sx, sy, s=50, alpha=.5)
+    plt.savefig('xy-shifts.pdf')
 
     # stack the frames with weights.
     # note that we must normalize the stacked result.
@@ -195,7 +219,7 @@ if __name__ == '__main__':
     fmin = np.amin(frame_stacked)
     fmax = np.amax(frame_stacked)
     cache = (frame_stacked-fmin)/(fmax-fmin)
-    tmax = 2.**(adc_digit_max) - 1
+    tmax = 2.**(adc_digit_max) - 1.
     frame_stacked = np.floor(cache*tmax)
     print("Weights computed and %i/%i best frames used for stacking. Time cost: %6.2f" 
         %(n_files-n_bad, n_files, time.time()-tst))
@@ -207,8 +231,8 @@ if __name__ == '__main__':
     # note that "gamma=(1,1), no_auto_bright=True" means to get linear rgb
     # rememer to use output_bps=16 for 16-bit output depth
     print("Ready to adjust the colors:")
-    dummy.raw_image[:,:] = frame_stacked
-    rgb = dummy.postprocess(gamma=(1,1), no_auto_bright=True, output_bps=16)
+    ref_raw.raw_image[:,:] = frame_stacked
+    rgb = ref_raw.postprocess(gamma=(1,1), no_auto_bright=True, output_bps=16)
     # note that the image size is different after converting from raw to rgb image
     m1, m2, npix = np.shape(rgb)[0], np.shape(rgb)[1], rgb.size
     tst = time.time()
@@ -220,8 +244,12 @@ if __name__ == '__main__':
     # save the final figure
     imageio.imsave(final_file, np.uint8(rgb))
 
-    # # show the final figure
-    # plt.figure(figsize=(6,4),dpi=200)
-    # plt.imshow(plt.imread(final_file))
+    # show the final figure
+    plt.figure(figsize=(6,4),dpi=200)
+    plt.xlabel('Y',fontsize=12)
+    plt.ylabel('X',fontsize=12)
+    plt.imshow(np.uint8(rgb))
 
     print("Done!")
+    
+    
