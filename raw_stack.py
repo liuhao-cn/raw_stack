@@ -6,14 +6,14 @@ import numpy as np
 import multiprocessing as mp
 
 
-# ##############################################################
-# from IPython.core.display import display, HTML
-# display(HTML("<style>.container { width:90% !important; }</style>"))
+##############################################################
+from IPython.core.display import display, HTML
+display(HTML("<style>.container { width:90% !important; }</style>"))
 
 
 ##############################################################
 # working directory, all raw files in this directory will be processed
-working_dir = "./"
+working_dir = "/work/astro/temp"
 
 # define the number of processes to be used
 nproc = 96
@@ -25,7 +25,7 @@ extension = "CR3"
 less_report = True
 
 # the file of reference frames
-reference_file = 'IMG_0686.CR3'
+reference_file = 'IMG_0000.CR3'
 
 # fraction of frames that will not be used
 bad_fraction = 0.4
@@ -45,7 +45,7 @@ gamma = [0.5,0.5,0.5]
 # name of the final image
 final_file = "final.tiff"
 
-# save aligned nibary files or not. Note that for multiprocessing, this must be True
+# save aligned binary files or not. Note that for multiprocessing, this must be True
 save_aligned_binary = True
 
 # save aligned images?
@@ -61,8 +61,7 @@ def raw_to_swp():
     for i in range(n_files):
         # read the raw data as an object, obtain the image and compute its fft
         with rawpy.imread(file_lst[i]) as raw:
-            frame = raw.raw_image
-            frame.tofile(file_swp[i])
+            raw.raw_image.tofile(file_swp[i])
 
 
 # subroutine that aligns all frames to the reference frame
