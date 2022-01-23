@@ -8,42 +8,46 @@ import multiprocessing as mp
 
 ##############################################################
 from IPython.core.display import display, HTML
-display(HTML("<style>.container { width:90% !important; }</style>"))
+display(HTML("<style>.container { width:95% !important; }</style>"))
 
 
 ##############################################################
-# working directory, all raw files in this directory will be processed
+# working directory, all raw files should be in this directory
 working_dir = "/work/astro/temp"
-
-# define the number of processes to be used
-nproc = 96
 
 # define the raw file extension
 extension = "CR3"
 
+# the file of reference frames. If set to None, then use the first frame in the list.
+reference_file = 'IMG_0000.CR3'
+
+# name of the final image
+final_file = "final.tiff"
+
+
+# working precision is for FFT and matrix multiplication
+working_precision = "float64"
+
+# define the number of processes to be used
+nproc = 96
+
 # If true, do not report the alignment result
 less_report = True
-
-# the file of reference frames
-reference_file = 'IMG_0000.CR3'
 
 # fraction of frames that will not be used
 bad_fraction = 0.4
 
-# dark_fac means the fraction of pixels that will be ignored due to "too dark".
+# dark_fac means the fraction of pixels that will be ignored as "too dark".
 dark_frac = 5e-4
 
-# bright_frac means the fraction of pixels that will be ignored due to "too bright".
+# bright_frac means the fraction of pixels that will be ignored as "too bright".
 bright_frac = 5e-4
 
 # The red, green and blue pixels are amplified by this factor for a custom white balance.
-color_enhance_fac = [1.05, 0.90, 1.05]
+color_amp_fac = [1.05, 0.90, 1.05]
 
 # final gamma
 gamma = [0.5,0.5,0.5]
-
-# name of the final image
-final_file = "final.tiff"
 
 # save aligned binary files or not. Note that for multiprocessing, this must be True
 save_aligned_binary = True
@@ -56,21 +60,30 @@ adc_digit_max = 16
 
 
 ##############################################################
-def raw_to_swp():
+#
+# read raw file and convert to bin so it can be used by multiprocessing
+#
+def read_raw():
     tst = time.time()
+    raw_data_type = None
     for i in range(n_files):
         # read the raw data as an object, obtain the image and compute its fft
         with rawpy.imread(file_lst[i]) as raw:
+            if raw_data_type==None:
+                raw_data_type = raw.raw_image.dtype
             raw.raw_image.tofile(file_swp[i])
+    return raw_data_type
 
 
-# subroutine that aligns all frames to the reference frame
+# 
+# align a frame to the reference frame
+# 
 def align_frames(i):
     tst = time.time()
     # read the raw data as an object, obtain the image and compute its fft
-    frame = np.fromfile(file_swp[i], dtype='uint16').reshape(n1, n2)
+    frame = np.fromfile(file_swp[i], dtype=raw_data_type).reshape(n1, n2)
     os.remove(file_swp[i])
-    frame_fft = fft.fft2(np.float32(frame))
+    frame_fft = fft.fft2(frame.astype(working_precision))
     # compute the frame offset
     cache = np.abs(fft.ifft2(ref_fft*frame_fft))
     index = np.unravel_index(np.argmax(cache, axis=None), cache.shape)
@@ -109,7 +122,7 @@ def adjust_color(i, samp):
     val = (samp-d1)/(d2-d1)
     val = np.where(val<0, 0, val)
     val = np.where(val>1, 1, val)
-    samp = (val**gamma[i])*256*color_enhance_fac[i]
+    samp = (val**gamma[i])*256*color_amp_fac[i]
     samp = np.where(samp<  0,   0, samp)
     samp = np.where(samp>255, 255, samp)
     return samp.reshape(m1, m2)
@@ -120,7 +133,7 @@ file_lst, file_bin, file_swp, file_tif = [], [], [], []
 for file in os.listdir():
     if file.endswith(extension):
         file_lst.append(file)
-        file_swp.append(os.path.splitext(file)[0] + '_aligned.swp')
+        file_swp.append(os.path.splitext(file)[0] + '.swp')
         file_bin.append(os.path.splitext(file)[0] + '_aligned.bin')
         file_tif.append(os.path.splitext(file)[0] + '_aligned.tif')
 n_files = np.int64(len(file_lst))
@@ -130,25 +143,33 @@ if nproc > n_files:
 
 
 # prepare the reference frame in the Fourier domain
+if reference_file==None:
+    reference_file = file_lst[0]
+
 ref_raw = rawpy.imread(reference_file)
 ref_frame = ref_raw.raw_image
 n1 = np.int64(np.shape(ref_frame)[0])
 n2 = np.int64(np.shape(ref_frame)[1])
-ref_fft = np.conjugate(fft.fft2(np.float32(ref_frame)))
+ref_fft = np.conjugate(fft.fft2(ref_frame.astype(working_precision)))
 
 
 
 # use multiprocessing to work on multiple files' alignment.
-frames_aligned = np.zeros([n_files, n1, n2], dtype=np.float64)
+frames_aligned = np.zeros([n_files, n1, n2], dtype=working_precision)
 
 if __name__ == '__main__':
     tst = time.time()
 
-    raw_to_swp()
-    
+    raw_data_type = read_raw()
+
+    # work with multiprocessing    
     with mp.Pool(nproc) as pool:
         output = [pool.map(align_frames, range(n_files))]
     
+    # # work with sequential alignment
+    # for i in range(n_files):
+    #     align_frames(i)
+
     output_arr = np.array(output)
     sx, sy = output_arr[0,:,1], output_arr[0,:,2]
     sx = np.where(sx >  n1/2, sx-n1, sx)
@@ -156,14 +177,11 @@ if __name__ == '__main__':
     sy = np.where(sy >  n2/2, sy-n2, sy)
     sy = np.where(sy < -n2/2, sy+n2, sy)
     
-    # for i in range(n_files):
-    #     align_frames(i)
-
     print("Alignment done. Time cost: %9.2f" %(time.time()-tst))
 
     # read the alignment results of multiple processes
     for i in range(n_files):
-        frame = np.fromfile(file_bin[i],dtype='uint16')
+        frame = np.fromfile(file_bin[i],dtype=raw_data_type)
         frames_aligned[i,:,:] = frame.reshape(n1, n2)
 
 
@@ -179,16 +197,14 @@ if __name__ == '__main__':
     cov = np.dot(frames_aligned, frames_aligned.transpose())
     
     # compute weights from the covariance matrix
-    aa = np.diag(cov)[0:n_files]
-    bb = np.sum(cov, axis=1)[0:n_files]
     w = np.zeros(n_files)
     for i in range(n_files):
-        w[i] = bb[i]/aa[i] - 1
+        w[i] = np.sum(cov[i,:])/cov[i,i] - 1
 
     # exclude the low quality frames
     n_bad = int(n_files*bad_fraction)
     thr = hp.nsmallest(n_bad, w)[n_bad-1]
-    if thr < 0: thr = 0
+    if thr<0: thr = 0
     w = np.where(w <= thr, 0, w)
     w = w / np.sum(w)
     
@@ -200,7 +216,7 @@ if __name__ == '__main__':
     w1 = np.where(w==0, np.nan, w)
     w2 = np.where(w==0, np.median(w), np.nan)
     plt.plot(w1*n_files, marker="o", label='Valid')
-    plt.plot(w2*n_files, marker="*", label='Invaid')
+    plt.plot(w2*n_files, marker="*", label='Invalid')
     plt.legend()
     plt.savefig('weights.pdf')
     
