@@ -6,9 +6,12 @@ import numpy as np
 import multiprocessing as mp
 
 
+
 ##############################################################
+# Improve the display effect of Jupyter notebook
 from IPython.core.display import display, HTML
 display(HTML("<style>.container { width:95% !important; }</style>"))
+
 
 
 ##############################################################
@@ -57,6 +60,7 @@ save_aligned_image = False
 
 # number of ADC digit. The true maximum value should be 2**adc_digit
 adc_digit_max = 16
+
 
 
 ##############################################################
