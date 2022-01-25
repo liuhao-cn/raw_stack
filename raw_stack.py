@@ -122,9 +122,10 @@ def align_frames(i):
 
 import heapq as hp
 # subroutine for adjusting the colors 
-def adjust_color(i, samp):
+def adjust_color(i, m1, m2, npix, bin_file):
     # number of "too dark" pixels and threshold
-    samp = samp.reshape(m1*m2)
+    samp = np.fromfile(bin_file, dtype="uint16").reshape(m1*m2)
+    # samp = samp.reshape(m1*m2)
     ndark = int(npix*dark_frac)
     d1 = hp.nsmallest(ndark, samp)[ndark-1]*1.
     # number of "too bright" pixels and threshold
@@ -138,7 +139,9 @@ def adjust_color(i, samp):
     samp = (val**gamma[i])*256*color_amp_fac[i]
     samp = np.where(samp<  0,   0, samp)
     samp = np.where(samp>255, 255, samp)
-    return samp.reshape(m1, m2)
+    samp.astype("uint16").tofile(bin_file)
+
+
 
 # make a list of woking files
 os.chdir(working_dir)
@@ -209,7 +212,7 @@ if __name__ == '__main__':
     tst = time.time()
     for i in range(0, n_files):
         frames_aligned[i,:,:] = frames_aligned[i,:,:] - np.mean(frames_aligned[i,:,:])
-    print("Median values of frames removed. Time cost: %9.2f" %(time.time()-tst)); tst = time.time()
+    print("Mean values of frames removed. Time cost: %9.2f" %(time.time()-tst)); tst = time.time()
     
 
     # compute the covariance matrix
@@ -267,13 +270,27 @@ if __name__ == '__main__':
     # linear rgb rememer to use output_bps=16 for 16-bit output depth
     ref_raw.raw_image[:,:] = frame_stacked
     rgb = ref_raw.postprocess(gamma=(1,1), no_auto_bright=True, output_bps=16)
+    r_bin_file = os.path.splitext(final_file)[0] + '.r'; rgb[:,:,0].tofile(r_bin_file)
+    g_bin_file = os.path.splitext(final_file)[0] + '.g'; rgb[:,:,1].tofile(g_bin_file)
+    b_bin_file = os.path.splitext(final_file)[0] + '.b'; rgb[:,:,2].tofile(b_bin_file)
     # note that the image size is different after converting from raw to rgb image
     m1, m2, npix = np.shape(rgb)[0], np.shape(rgb)[1], rgb.size
     tst = time.time()
-    for i in range(3):
-        rgb[:,:,i] = adjust_color(i, rgb[:,:,i])
-        print("Color adjusted for color channel %i. Time cost: %8.2f" %(i, time.time()-tst))
-        tst = time.time()
+    ic = [0, 1, 2]
+    im1 = [m1, m1, m1]
+    im2 = [m2, m2, m2]
+    inp = [npix, npix, npix]
+    ifn = [r_bin_file, g_bin_file, b_bin_file]
+    with mp.Pool(3) as pool:
+        output = [pool.starmap(adjust_color, zip(ic, im1, im2, inp, ifn))]
+    rgb[:,:,0] = np.fromfile(r_bin_file, dtype="uint16").reshape(m1, m2)
+    rgb[:,:,1] = np.fromfile(g_bin_file, dtype="uint16").reshape(m1, m2)
+    rgb[:,:,2] = np.fromfile(b_bin_file, dtype="uint16").reshape(m1, m2)
+    print("Color adjusted. Time cost: %8.2f" %(time.time()-tst))
+    os.remove(r_bin_file)
+    os.remove(g_bin_file)
+    os.remove(b_bin_file)
+    tst = time.time()
 
     # save the final figure
     imageio.imsave(final_file, np.uint8(rgb))
@@ -287,3 +304,4 @@ if __name__ == '__main__':
     print("Done!")
     
     
+
