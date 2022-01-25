@@ -49,7 +49,7 @@ color_amp_fac = [1.05, 0.90, 1.05]
 gamma = [0.5,0.5,0.5]
 
 # save aligned binary files or not. Note that for multiprocessing, this must be True
-save_aligned_binary = True
+save_aligned_binary = False
 
 # save aligned images?
 save_aligned_image = False
