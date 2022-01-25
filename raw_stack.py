@@ -59,7 +59,7 @@ adc_digit_max = 16
 
 
 ##############################################################
-If console is False:
+if console == False:
     # Improve the display effect of Jupyter notebook
     from IPython.core.display import display, HTML
     display(HTML("<style>.container { width:95% !important; }</style>"))
@@ -93,18 +93,22 @@ def align_frames(i):
     frame = np.fromfile(file_swp[i], dtype=raw_data_type).reshape(n1, n2)
     os.remove(file_swp[i])
     frame_fft = fft.fft2(frame.astype(working_precision))
+    
     # compute the frame offset
     cache = np.abs(fft.ifft2(ref_fft*frame_fft))
     index = np.unravel_index(np.argmax(cache, axis=None), cache.shape)
     s1, s2 = -index[0], -index[1]
+    
     # make sure that the Bayer matrix will not be corrupted
     s1 = s1 - np.mod(s1, 2)
     s2 = s2 - np.mod(s2, 2)
+    
     # fix the offset and save into the result array
     frame = np.roll(frame, (s1, s2), axis=(0,1))
+    
     # save the aligned images and binaries if necessary
-    if save_aligned_binary is True:
-        frame.tofile(file_bin[i])
+    frame.tofile(file_bin[i])
+    
     if save_aligned_image is True:
         raw.raw_image[:,:] = frame
         rgb = raw.postprocess(use_camera_wb=True)
@@ -169,12 +173,15 @@ frames_aligned = np.zeros([n_files, n1, n2], dtype=working_precision)
 if __name__ == '__main__':
     tst = time.time()
 
+    # read all raw files
     raw_data_type = read_raw()
+    print("Raw file read in. Time cost: %9.2f" %(time.time()-tst)); tst = time.time()
 
-    # work with multiprocessing    
+
+    # work with multiprocessing
     with mp.Pool(nproc) as pool:
         output = [pool.map(align_frames, range(n_files))]
-    
+
     # # work with sequential alignment
     # for i in range(n_files):
     #     align_frames(i)
@@ -185,26 +192,30 @@ if __name__ == '__main__':
     sx = np.where(sx < -n1/2, sx+n1, sx)
     sy = np.where(sy >  n2/2, sy-n2, sy)
     sy = np.where(sy < -n2/2, sy+n2, sy)
-    
-    print("Alignment done. Time cost: %9.2f" %(time.time()-tst))
+    print("Alignment done. Time cost: %9.2f" %(time.time()-tst)); tst = time.time()
+
 
     # read the alignment results of multiple processes
     for i in range(n_files):
         frame = np.fromfile(file_bin[i],dtype=raw_data_type)
         frames_aligned[i,:,:] = frame.reshape(n1, n2)
-
+        if save_aligned_binary is False:
+            os.remove(file_bin[i])
+    print("Aligned frames read in. Time cost: %9.2f" %(time.time()-tst)); tst = time.time()
 
 
     # stack the frames with weights computed from the summed cross
     # covariance between frames (ignore auto covariance)
     tst = time.time()
     for i in range(0, n_files):
-        frames_aligned[i,:,:] = frames_aligned[i,:,:] - np.median(frames_aligned[i,:,:])
+        frames_aligned[i,:,:] = frames_aligned[i,:,:] - np.mean(frames_aligned[i,:,:])
+    print("Median values of frames removed. Time cost: %9.2f" %(time.time()-tst)); tst = time.time()
     
+
     # compute the covariance matrix
     frames_aligned = frames_aligned.reshape(n_files, n1*n2)
     cov = np.dot(frames_aligned, frames_aligned.transpose())
-    
+
     # compute weights from the covariance matrix
     w = np.zeros(n_files)
     for i in range(n_files):
@@ -216,7 +227,19 @@ if __name__ == '__main__':
     if thr<0: thr = 0
     w = np.where(w <= thr, 0, w)
     w = w / np.sum(w)
-    
+
+    # stack the frames with weights.
+    # note that we must normalize the stacked result.
+    frame_stacked = np.dot(w, frames_aligned).reshape(n1, n2)
+    fmin = np.amin(frame_stacked)
+    fmax = np.amax(frame_stacked)
+    cache = (frame_stacked-fmin)/(fmax-fmin)
+    tmax = 2.**(adc_digit_max) - 1.
+    frame_stacked = np.floor(cache*tmax)
+    print("Stacked frame obtained from %i/%i best frames. Time cost: %9.2f" 
+        %(n_files-n_bad, n_files, time.time()-tst)); tst = time.time()
+        
+
     # plot the weights for test 
     plt.figure(figsize=(4,2),dpi=200)
     plt.title(r'Stacking weights ($w\times N_{frames}$)')
@@ -237,24 +260,11 @@ if __name__ == '__main__':
     plt.scatter(sx, sy, s=50, alpha=.5)
     plt.savefig('xy-shifts.pdf')
 
-    # stack the frames with weights.
-    # note that we must normalize the stacked result.
-    frame_stacked = np.dot(w, frames_aligned).reshape(n1, n2)
-    fmin = np.amin(frame_stacked)
-    fmax = np.amax(frame_stacked)
-    cache = (frame_stacked-fmin)/(fmax-fmin)
-    tmax = 2.**(adc_digit_max) - 1.
-    frame_stacked = np.floor(cache*tmax)
-    print("Weights computed and %i/%i best frames used for stacking. Time cost: %6.2f" 
-        %(n_files-n_bad, n_files, time.time()-tst))
 
-
-
-    # adjust the color and prepare for 8-bit output, do it on linear rgb so that we still have 
-    # linear response, but don't have to worry about the Bayer matrix.
-    # note that "gamma=(1,1), no_auto_bright=True" means to get linear rgb
-    # rememer to use output_bps=16 for 16-bit output depth
-    print("Ready to adjust the colors:")
+    # adjust the color and prepare for 8-bit output, do it on linear rgb so
+    # that we still have linear response, but don't have to worry about the
+    # Bayer matrix. note that "gamma=(1,1), no_auto_bright=True" means to get
+    # linear rgb rememer to use output_bps=16 for 16-bit output depth
     ref_raw.raw_image[:,:] = frame_stacked
     rgb = ref_raw.postprocess(gamma=(1,1), no_auto_bright=True, output_bps=16)
     # note that the image size is different after converting from raw to rgb image
@@ -262,7 +272,7 @@ if __name__ == '__main__':
     tst = time.time()
     for i in range(3):
         rgb[:,:,i] = adjust_color(i, rgb[:,:,i])
-        print("Color adjusted for color channel %i, time cost: %8.2f" %(i, time.time()-tst))
+        print("Color adjusted for color channel %i. Time cost: %8.2f" %(i, time.time()-tst))
         tst = time.time()
 
     # save the final figure
