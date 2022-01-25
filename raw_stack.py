@@ -268,12 +268,17 @@ if __name__ == '__main__':
     # that we still have linear response, but don't have to worry about the
     # Bayer matrix. note that "gamma=(1,1), no_auto_bright=True" means to get
     # linear rgb rememer to use output_bps=16 for 16-bit output depth
+    #
+    # convert the stacked frame to raw and then to rgb, save the rgb files.
+    # note that the image size is different after converting from raw to rgb
+    # image
     ref_raw.raw_image[:,:] = frame_stacked
     rgb = ref_raw.postprocess(gamma=(1,1), no_auto_bright=True, output_bps=16)
     r_bin_file = os.path.splitext(final_file)[0] + '.r'; rgb[:,:,0].tofile(r_bin_file)
     g_bin_file = os.path.splitext(final_file)[0] + '.g'; rgb[:,:,1].tofile(g_bin_file)
     b_bin_file = os.path.splitext(final_file)[0] + '.b'; rgb[:,:,2].tofile(b_bin_file)
-    # note that the image size is different after converting from raw to rgb image
+
+    # color correction in parallel
     m1, m2, npix = np.shape(rgb)[0], np.shape(rgb)[1], rgb.size
     tst = time.time()
     ic = [0, 1, 2]
@@ -283,14 +288,14 @@ if __name__ == '__main__':
     ifn = [r_bin_file, g_bin_file, b_bin_file]
     with mp.Pool(3) as pool:
         output = [pool.starmap(adjust_color, zip(ic, im1, im2, inp, ifn))]
-    rgb[:,:,0] = np.fromfile(r_bin_file, dtype="uint16").reshape(m1, m2)
-    rgb[:,:,1] = np.fromfile(g_bin_file, dtype="uint16").reshape(m1, m2)
-    rgb[:,:,2] = np.fromfile(b_bin_file, dtype="uint16").reshape(m1, m2)
+
+    # read the color correction result and save to 
+    rgb[:,:,0] = np.fromfile(r_bin_file, dtype="uint16").reshape(m1, m2); os.remove(r_bin_file)
+    rgb[:,:,1] = np.fromfile(g_bin_file, dtype="uint16").reshape(m1, m2); os.remove(g_bin_file)
+    rgb[:,:,2] = np.fromfile(b_bin_file, dtype="uint16").reshape(m1, m2); os.remove(b_bin_file)
     print("Color adjusted. Time cost: %8.2f" %(time.time()-tst))
-    os.remove(r_bin_file)
-    os.remove(g_bin_file)
-    os.remove(b_bin_file)
     tst = time.time()
+    
 
     # save the final figure
     imageio.imsave(final_file, np.uint8(rgb))
