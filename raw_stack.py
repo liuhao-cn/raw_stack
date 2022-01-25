@@ -1,17 +1,10 @@
 ##############################################################
 import os, rawpy, imageio, time, sys
 import scipy.fft as fft
+import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
 import multiprocessing as mp
-
-
-
-##############################################################
-# Improve the display effect of Jupyter notebook
-from IPython.core.display import display, HTML
-display(HTML("<style>.container { width:95% !important; }</style>"))
-
 
 
 ##############################################################
@@ -27,9 +20,12 @@ reference_file = 'IMG_0000.CR3'
 # name of the final image
 final_file = "final.tiff"
 
-
 # working precision is for FFT and matrix multiplication
 working_precision = "float64"
+
+# if true, work in console mode, will not process the Jupyter notebook
+# code and will not produce online images.
+console = True
 
 # define the number of processes to be used
 nproc = 96
@@ -61,6 +57,15 @@ save_aligned_image = False
 # number of ADC digit. The true maximum value should be 2**adc_digit
 adc_digit_max = 16
 
+
+##############################################################
+If console is False:
+    # Improve the display effect of Jupyter notebook
+    from IPython.core.display import display, HTML
+    display(HTML("<style>.container { width:95% !important; }</style>"))
+else:
+    # do not produce online images (but will still save pdf)
+    matplotlib.use('Agg')
 
 
 ##############################################################
