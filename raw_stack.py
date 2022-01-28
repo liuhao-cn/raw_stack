@@ -4,18 +4,14 @@ import scipy.fft as fft
 import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
+import cv2 as cv
 import multiprocessing as mp
+from astropy.io import fits
 
 
 ##############################################################
 # working directory, all raw files should be in this directory
-working_dir = "/work/astro/temp"
-
-# define the raw file extension
-extension = "CR3"
-
-# the file of reference frames. If set to None, then use the first frame in the list.
-reference_file = 'IMG_0000.CR3'
+working_dir = "/work/astro/fits"
 
 # name of the final image
 final_file = "final.tiff"
@@ -23,12 +19,25 @@ final_file = "final.tiff"
 # working precision is for FFT and matrix multiplication
 working_precision = "float64"
 
-# if true, work in console mode, will not process the Jupyter notebook
-# code and will not produce online images.
+# define the input file extension, can be fit, fits (for fits files); or CR2,
+# CR3, nef...(for raw files)
+extension = "fit"
+
+# the file of reference frames. If set to None, then use the first frame in the list.
+reference_file = 'Light_ASIImg_0.1sec_Bin1_-19.0C_gain0_2022-01-28_200730_frame0001.fit'
+
+# define the Bayer matrix format, only for the fits file
+bayer_matrix_format = cv.COLOR_BayerBG2RGB
+
+# the page number configuration, only for the fits file
+page_num = 0
+
+# if true, work in console mode, will not process the Jupyter notebook code
+# and will not produce online images.
 console = True
 
-# define the number of processes to be used
-nproc = 96
+# define the maximum number of processes to be used
+nproc_max = 96
 
 # If true, do not report the alignment result
 less_report = True
@@ -67,12 +76,17 @@ else:
     # do not produce online images (but will still save pdf)
     matplotlib.use('Agg')
 
+if extension=='fit' or extension=='fits':
+    input_format = 'fits'
+else:
+    input_format = 'raw'
+
 
 ##############################################################
 #
 # read raw file and convert to bin so it can be used by multiprocessing
 #
-def read_raw():
+def read_frame_raw():
     tst = time.time()
     raw_data_type = None
     for i in range(n_files):
@@ -82,6 +96,39 @@ def read_raw():
                 raw_data_type = raw.raw_image.dtype
             raw.raw_image.tofile(file_swp[i])
     return raw_data_type
+
+
+#
+# read fits file and convert to bin so it can be used by multiprocessing
+#
+def read_frame_fits():
+    tst = time.time()
+    raw_data_type = None
+    for i in range(n_files):
+        # read the raw data as an object, obtain the image and compute its fft
+        with fits.open(file_lst[i]) as hdu:
+            frame = hdu[page_num].data
+            if raw_data_type==None:
+                raw_data_type = frame.dtype
+            frame.tofile(file_swp[i])
+    return raw_data_type
+
+
+#
+# use the information in the raw object to convert frame to rgb image
+#
+def frame2rgb_raw(raw, frame):
+    raw.raw_image[:,:] = frame
+    rgb = raw.postprocess(gamma=(1,1), no_auto_bright=True, output_bps=16)
+    return rgb
+
+
+#
+# use the pre-defined bayer_matrix_format to convert fits-frame to rgb image
+#
+def frame2rgb_fits(frame):
+    rgb = cv.cvtColor(frame.astype(raw_data_type), bayer_matrix_format)
+    return rgb
 
 
 # 
@@ -153,8 +200,11 @@ for file in os.listdir():
         file_bin.append(os.path.splitext(file)[0] + '_aligned.bin')
         file_tif.append(os.path.splitext(file)[0] + '_aligned.tif')
 n_files = np.int64(len(file_lst))
-if nproc > n_files:
+
+if nproc_max > n_files:
     nproc = n_files
+else:
+    nproc = nproc_max
 
 
 
@@ -162,12 +212,19 @@ if nproc > n_files:
 if reference_file==None:
     reference_file = file_lst[0]
 
-ref_raw = rawpy.imread(reference_file)
-ref_frame = ref_raw.raw_image
+if input_format=='raw':
+    ref_raw = rawpy.imread(reference_file)
+    ref_frame = ref_raw.raw_image
+elif input_format=='fits':
+    with fits.open(reference_file) as hdu:
+        ref_frame = hdu[page_num].data
+else:
+    print("Error! Unknown input file format, should be fits or raw!")
+    sys.exit()
+
 n1 = np.int64(np.shape(ref_frame)[0])
 n2 = np.int64(np.shape(ref_frame)[1])
 ref_fft = np.conjugate(fft.fft2(ref_frame.astype(working_precision)))
-
 
 
 # use multiprocessing to work on multiple files' alignment.
@@ -177,8 +234,15 @@ if __name__ == '__main__':
     tst = time.time()
 
     # read all raw files
-    raw_data_type = read_raw()
-    print("Raw file read in. Time cost: %9.2f" %(time.time()-tst)); tst = time.time()
+    if input_format=='raw':
+        raw_data_type = read_frame_raw()
+        print("Raw file read in. Time cost: %9.2f" %(time.time()-tst)); tst = time.time()
+    elif input_format=='fits':
+        raw_data_type = read_frame_fits()
+        print("Fits file read in. Time cost: %9.2f" %(time.time()-tst)); tst = time.time()
+    else:
+        print("Error! Unknown input file format, should be fits or raw!")
+        sys.exit()
 
 
     # work with multiprocessing
@@ -272,8 +336,14 @@ if __name__ == '__main__':
     # convert the stacked frame to raw and then to rgb, save the rgb files.
     # note that the image size is different after converting from raw to rgb
     # image
-    ref_raw.raw_image[:,:] = frame_stacked
-    rgb = ref_raw.postprocess(gamma=(1,1), no_auto_bright=True, output_bps=16)
+    if input_format=='raw':
+        rgb = frame2rgb_raw(ref_raw, frame_stacked)
+    elif input_format=='fits':
+        rgb = frame2rgb_fits(frame_stacked)
+    else:
+        print("Error! Unknown input file format, should be fits or raw!")
+        sys.exit()
+
     r_bin_file = os.path.splitext(final_file)[0] + '.r'; rgb[:,:,0].tofile(r_bin_file)
     g_bin_file = os.path.splitext(final_file)[0] + '.g'; rgb[:,:,1].tofile(g_bin_file)
     b_bin_file = os.path.splitext(final_file)[0] + '.b'; rgb[:,:,2].tofile(b_bin_file)
