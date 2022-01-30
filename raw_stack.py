@@ -84,7 +84,8 @@ else:
 
 ##############################################################
 #
-# read raw file and convert to bin so it can be used by multiprocessing
+# read fits or raw file and convert to bin so it can be used by
+# multiprocessing
 #
 def read_frame_raw():
     tst = time.time()
@@ -97,10 +98,6 @@ def read_frame_raw():
             raw.raw_image.tofile(file_swp[i])
     return raw_data_type
 
-
-#
-# read fits file and convert to bin so it can be used by multiprocessing
-#
 def read_frame_fits():
     tst = time.time()
     raw_data_type = None
@@ -115,17 +112,13 @@ def read_frame_fits():
 
 
 #
-# use the information in the raw object to convert frame to rgb image
+# use the raw or fits information to convert a frame to rgb image
 #
 def frame2rgb_raw(raw, frame):
     raw.raw_image[:,:] = frame
     rgb = raw.postprocess(gamma=(1,1), no_auto_bright=True, output_bps=16)
     return rgb
 
-
-#
-# use the pre-defined bayer_matrix_format to convert fits-frame to rgb image
-#
 def frame2rgb_fits(frame):
     rgb = cv.cvtColor(frame.astype(raw_data_type), bayer_matrix_format)
     return rgb
