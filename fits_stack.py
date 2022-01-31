@@ -30,7 +30,7 @@ ahu_height = 63.00  # needs to be updated
 ahu_zone = +8
 ahu_observatory = EarthLocation(lon=ahu_lon*u.deg, lat=ahu_lat*u.deg, height=ahu_height*u.m)
 
-# observation target, either in name or in ra-dec
+# Define observation target, either in name or in ra-dec.
 # in name, use (for example): target = SkyCoord.from_name("m31"); 
 # in ra-dec, use (for example): target = SkyCoord(ra=45*u.deg, dec=45*u.deg)
 target = SkyCoord.from_name("m42")
@@ -38,55 +38,29 @@ target = SkyCoord.from_name("m42")
 # Working directory, all raw or fits files should be in this directory
 working_dir = "/work/astro/fits"
 
+output_dir = "output"
+
 # Specify whether or not to fix the field rotation (needs the observation time, target and site locations). 
 # For an Alt-az mount, this is necessary, but for an equatorial mount this is unnecessary.
-do_fix_ratation = True
-
-# Name of the final image
-final_file = "final.tiff"
-
-# Working precision takes effect in FFT and matrix multiplication
-working_precision = "float64"
+do_fix_ratation = False
 
 # Define the input file extension. All files in the working directory with this extension will be used.
-extension = "fit"
+extension = "fits"
 
 # Page number of data in the fits file
 page_num = 0
 
-# Tukey window alpha parameter, used to improve the mathced filtering
-# for example, 0.04 means 2% at each edge (left, right, top, bottom) is suppressed
-tukey_alpha = 0.04
-
 # Tag for the obs. date and time string (for fits file)
 date_tag = 'DATE-OBS'
 
-# Define the Bayer matrix format, only for the fits file
-bayer_matrix_format = cv2.COLOR_BayerBG2RGB
-
 # If true, work in console mode, will not process the Jupyter notebook code and will not produce online images.
-console = True
+console = False
 
 # Define the maximum number of processes to be used
 nproc_max = 96
 
-# If true, do not report the alignment result
-less_report = True
-
 # Fraction of frames that will not be used
-bad_fraction = 0.3
-
-# dark_fac means the fraction of pixels that will be ignored as "too dark".
-dark_frac = 5e-4
-
-# bright_frac means the fraction of pixels that will be ignored as "too bright".
-bright_frac = 5e-4
-
-# The red, green and blue pixels are amplified by this factor for a custom white balance.
-rgb_fac = [1.05, 0.90, 0.4]
-
-# Final gamma
-rgb_gamma = [0.5,0.5,0.5]
+bad_fraction = 0.6
 
 # Save aligned binary files or not. Note that for multiprocessing, this must be True
 save_aligned_binary = False
@@ -94,13 +68,36 @@ save_aligned_binary = False
 # Save aligned images?
 save_aligned_image = False
 
+# Tukey window alpha parameter, used to improve the matched filtering
+# for example, 0.04 means 2% at each edge (left, right, top, bottom) is suppressed
+tukey_alpha = 0.02
+
+# If true, do not report the alignment result
+less_report = True
+
+# increase this value will amplify the corresponding color
+rgb_max = [64000,56000,64000]
+
+# increase this value will further increase the contrast
+rgb_gamma = [0.9, 0.8, 0.9]
+
+# Define the Bayer matrix format, only for the fits file
+bayer_matrix_format = cv2.COLOR_BayerBG2RGB
+
 # Number of ADC digit. The true maximum value should be 2**adc_digit. This should usualy be 16.
 adc_digit_max = 16
 
 # field rotation ang file
 file_rot_ang = "field_rot_ang.bin"
 
+# Name of the final image
+final_file_tif = "final.tiff"
 
+# Name of the final fits
+final_file_fits = "frame_stacked.fits"
+
+# Working precision takes effect in FFT and matrix multiplication
+working_precision = "float64"
 
 
 
@@ -203,7 +200,7 @@ def adjust_color(i, m1, m2, bin_file, raw_data_type):
     # number of "too bright" pixels and threshold
     nbright = int(npix*bright_frac)
     d2 = hp.nlargest(nbright, samp)[nbright-1]*1.
-    # rescaling, note that this requires 16-bit to save weak signal from bright sky-light
+    # re-scaling, note that this requires 16-bit to save weak signal from bright sky-light
     # note that val is expected to be in range [0,1]. Out-of-range values will be truncated.
     val = np.float64(samp-d1)/np.float64(d2-d1)
     val = np.where(val<=0, 1./val_max, val)
@@ -212,6 +209,52 @@ def adjust_color(i, m1, m2, bin_file, raw_data_type):
     samp = np.where(samp<      0,       0, samp)
     samp = np.where(samp>val_max, val_max, samp)
     samp.astype(raw_data_type).tofile(bin_file)
+
+
+def norm_array(x_in, xmin, xmax):
+    x = x_in.copy()
+    x = np.where(x<xmin, xmin, x)
+    x = np.where(x>xmax, xmax, x)
+    x = np.float64(x-xmin)/np.float64(xmax-xmin)
+    return x
+
+
+# manually adjust the rgb range
+def adjust_color_manual(rgb, rgb_min, rgb_max, rgb_gamma):
+    global_max = 2.**adc_digit_max-1
+    r = norm_array(rgb[:,:,0], rgb_min[0], rgb_max[0])
+    g = norm_array(rgb[:,:,1], rgb_min[1], rgb_max[1])
+    b = norm_array(rgb[:,:,2], rgb_min[2], rgb_max[2])
+    r = (r**rgb_gamma[0])*global_max
+    g = (g**rgb_gamma[1])*global_max
+    b = (b**rgb_gamma[2])*global_max
+    rgb_adjusted = rgb*0
+    rgb_adjusted[:,:,0] = r
+    rgb_adjusted[:,:,1] = g
+    rgb_adjusted[:,:,2] = b
+    return rgb_adjusted
+
+
+# modifed histogram equalization that allows range and gamma correction
+def modified_hist_equal(array, gamma, val_max=64000, bins=2**(adc_digit_max-1)):
+    # get image histogram
+    hist, bins = np.histogram(array.flatten(), bins, density=True)
+    cdf = hist.cumsum()
+    cdf = (cdf/np.amax(cdf))**gamma
+    cdf = val_max * cdf
+    # use linear interpolation of cdf to find new pixel values
+    array_equal = np.interp(array.flatten(), bins[:-1], cdf)
+    return array_equal.reshape(array.shape), cdf
+
+
+# color correction using modified histogram qualization
+def color_correction(rgb, rgb_gamma, rgb_max=[64000,64000,64000], bins=2**(adc_digit_max-1)):
+    rgb_modified = rgb*0
+    for i in range(3):
+        x = rgb[:,:,i]
+        x, cdf = modified_hist_equal(x, rgb_gamma[i], val_max=rgb_max[i], bins=bins)
+        rgb_modified[:,:,i] = x
+    return rgb_modified, cdf
 
 
 # convert elevation and azimuth to unit vectors
@@ -224,9 +267,39 @@ def elaz2vec(el, az):
     vec[:,2] = np.sin(el*d2r)
     return vec
 
+def len_vec(vec):
+    return np.sqrt(np.sum(vec*vec, axis=1))
 
-# compute the field rotation
-def compute_field_rot(target, hor_ref_frame):
+def unit_vec(vec):
+    amp = len_vec(vec)
+    vec_nml = vec.copy()
+    vec_nml[:,0] = vec_nml[:,0] / amp
+    vec_nml[:,1] = vec_nml[:,1] / amp
+    vec_nml[:,2] = vec_nml[:,2] / amp
+    return vec_nml
+
+# Convert round angle to equivalent linear angles. The idea is: when the
+# difference between two neighbors is bigger than a threshold, all following
+# angles are corrected by n*360 degree to minimize the difference.
+def round2linear(ang_in, deg=True, threshold=350):
+    n = np.size(ang_in)
+    ang = ang_in.copy()
+    fac = 180/np.pi
+    if deg==False:
+        ang = ang*fac
+    for i in range(n-1):
+        dif = ang[i]-ang[i+1]
+        if np.abs(dif)>threshold:
+            da = ang[i+1] - ang[i]
+            cc = np.cos(da/fac)
+            ss = np.sin(da/fac)
+            da1 = np.arctan2(ss, cc)*fac
+            ang[i+1:n] = ang[i+1:n] + da1 - da
+    return ang
+
+# compute the field rotation, return continuous angle, but can also return
+# arccos values by debug=True (discontinuous, only for debug)
+def compute_field_rot(target, hor_ref_frame, debug=False):
     north_pole = SkyCoord(ra=0*u.deg, dec=90*u.deg)
     north_pole_coord_hor = north_pole.transform_to(hor_ref_frame)
     target_coord_hor = target.transform_to(hor_ref_frame)
@@ -236,18 +309,27 @@ def compute_field_rot(target, hor_ref_frame):
     el_np = north_pole_coord_hor.alt.to_value()
     az_np = north_pole_coord_hor.az.to_value()
     vec_target = elaz2vec(el_target, az_target)
-    vec_north = elaz2vec(el_np, az_np)
-    vec_z = vec_north*0; vec_z[:,2] = 1
-    # compute the local east by cross product for the two reference frames respectively
-    vec1 = np.cross(vec_target, vec_north)
-    vec2 = np.cross(vec_target, vec_z)
-    # the field rotation is the angle between the two "local east"
-    amp1 = np.sqrt( np.sum(vec1*vec1, axis=1) )
-    amp2 = np.sqrt( np.sum(vec2*vec2, axis=1) )
-    rot_ang = np.arccos( np.sum(vec1*vec2, axis=1)/amp1/amp2 )*180/np.pi
+    vec_north  = elaz2vec(el_np, az_np)
+    vec_z      = vec_north*0; vec_z[:,2] = 1
+    # compute local east by cross product, with normalization
+    east_cel = unit_vec(np.cross(vec_target, vec_north))
+    east_hor = unit_vec(np.cross(vec_target, vec_z    ))
+    # determine the hor-to-cel rotation direction (sign of rotation)
+    vec_hor2cel = np.cross(east_hor, east_cel)
+    flag = np.sum(vec_hor2cel*vec_target, axis=1)
+    flag = np.where(flag>0, 1, -1)
+    # compute field rotation angle by atan2
+    val_cos = np.sum(east_cel*east_hor, axis=1)
+    val_sin = len_vec(vec_hor2cel)
+    rot_ang = np.arctan2(val_sin, val_cos)*180/np.pi
+    # and determine the direction of rotation
+    rot_ang = rot_ang * flag
+    if debug==True:
+        rot_ang = np.arccos(val_cos)*180/np.pi
     return rot_ang
 
-# note: need to check if we should multiply -1 to angle.
+# note: need to check if we should multiply -1 to angle. 
+# note: the four Bayer blocks are rotated separately so as not to corrupt the Bayer matrix.
 def fix_rotation(file, angle, raw_data_type, n1, n2):
     frame = np.fromfile(file, dtype=raw_data_type).reshape(int(n1/2), 2, int(n2/2), 2)
     frame00 = frame[:,0,:,0].reshape(int(n1/2), int(n2/2))
@@ -288,17 +370,20 @@ def fix_rotation(file, angle, raw_data_type, n1, n2):
 # 7. Adjust the color
 ##############################################################
 
-if console == False:
+if console == True:
+    # do not produce online images (but will still save pdf)
+    matplotlib.use('Agg')
+else:
     # Improve the display effect of Jupyter notebook
     from IPython.core.display import display, HTML
     display(HTML("<style>.container { width:95% !important; }</style>"))
-else:
-    # do not produce online images (but will still save pdf)
-    matplotlib.use('Agg')
 
 # make a list of woking files and determine the number of processes to be used
 os.chdir(working_dir)
-file_lst, file_bin, file_swp, file_tif = [], [], [], []
+if not os.path.isdir(output_dir):
+    os.mkdir(output_dir)
+
+file_lst, file_swp, file_bin, file_tif = [], [], [], []
 for file in os.listdir():
     if file.endswith(extension):
         file_lst.append(file)
@@ -325,60 +410,60 @@ n2 = np.int64(np.shape(ref_frame)[1])
 w1 = tukey(n1, alpha=tukey_alpha)
 w2 = tukey(n2, alpha=tukey_alpha)
 win = np.dot(w1.reshape(n1, 1), w2.reshape(1, n2))
+ref_fft = np.conjugate(fft.fft2((ref_frame*win).astype(working_precision)))
 
 # read the frames by main
 if __name__ == '__main__':
     # prepare the working array
     frames_working = np.zeros([n_files, n1, n2], dtype=working_precision)
     
-    # read frames, save the observation times, and compute the local horizontal reference frames accordingly
+    # read frames, save the observation times, and compute the local
+    # horizontal reference frames accordingly
     tst = time.time()
     datetime = []
     for i in range(n_files):
         frame1, time1, _ = read_frame_fits(file_lst[i])
         frame1.tofile(file_swp[i])
         datetime.append(time1)
-        #####################
         frames_working[i,:,:] = frame1
     print("Frames read and cached by the main proc, time cost:       %9.2f" %(time.time()-tst))
 
 # fix rotation if necessary (multi-processes)
-if __name__ == '__main__':
-    if do_fix_ratation==True:
-        tst = time.time()
-        obstime_list = astro_time(datetime) - ahu_zone*u.hour
-        hor_ref_frame = AltAz(obstime=obstime_list, location=ahu_observatory)
+if __name__ == '__main__' and do_fix_ratation==True:
+    tst = time.time()
+    obstime_list = astro_time(datetime) - ahu_zone*u.hour
+    hor_ref_frame = AltAz(obstime=obstime_list, location=ahu_observatory)
 
-        # compute the reletive time in seconds, and subtract the median value to minimize the rotations
-        rel_sec = (obstime_list - obstime_list[0]).to_value(format='sec')
-        rel_sec = rel_sec - np.median(rel_sec)
-        
-        # compute the absolute field rotation angles as "rot_ang"
-        rot_ang = compute_field_rot(target, hor_ref_frame)
-        rot_ang = rot_ang - np.median(rot_ang)
-        rot_ang.astype(working_precision).tofile(file_rot_ang)
-        print("Rotation angles computed, time cost:                      %9.2f" %(time.time()-tst))
+    # compute the reletive time in seconds, and subtract the median value to minimize the rotations
+    rel_sec = (obstime_list - obstime_list[0]).to_value(format='sec')
+    rel_sec = rel_sec - np.median(rel_sec)
+    
+    # compute the absolute field rotation angles as "rot_ang"
+    rot_ang = compute_field_rot(target, hor_ref_frame)
+    rot_ang = rot_ang - np.median(rot_ang)
+    rot_ang.astype(working_precision).tofile(file_rot_ang)
+    print("Rotation angles computed, time cost:                      %9.2f" %(time.time()-tst))
 
-        # plot the field rotation angle for test 
-        plt.figure(figsize=(4,2),dpi=200)
-        plt.title('The field rotation angle')
-        plt.xlabel('Time (sec)',fontsize=9)
-        plt.ylabel('Angle',fontsize=9)
-        plt.plot(rel_sec, rot_ang, marker="o")
-        plt.savefig('field_rot_angle.pdf')
+    # plot the field rotation angle for test 
+    plt.figure(figsize=(4,2), dpi=200)
+    plt.title('The field rotation angle')
+    plt.xlabel('Time (sec)', fontsize=9)
+    plt.ylabel('Angle', fontsize=9)
+    plt.plot(rel_sec, rot_ang, marker="o")
+    plt.savefig('field_rot_angle.pdf')
 
-        # fix the field rotation (multi-processes)
-        tst = time.time()
-        p1, p2, p3, p4, p5 = [], [], [], [], []
-        for i in range(n_files):
-            p1.append(file_swp[i])
-            p2.append(rot_ang[i])
-            p3.append(raw_data_type)
-            p4.append(n1)
-            p5.append(n2)
-        with mp.Pool(nproc) as pool:
-            output = [pool.starmap(fix_rotation, zip(p1, p2, p3, p4, p5))]
-        print("Field rotation fixed, time cost:                          %9.2f" %(time.time()-tst) )
+    # fix the field rotation (multi-processes)
+    tst = time.time()
+    p1, p2, p3, p4, p5 = [], [], [], [], []
+    for i in range(n_files):
+        p1.append(file_swp[i])
+        p2.append(rot_ang[i])
+        p3.append(raw_data_type)
+        p4.append(n1)
+        p5.append(n2)
+    with mp.Pool(nproc) as pool:
+        output = [pool.starmap(fix_rotation, zip(p1, p2, p3, p4, p5))]
+    print("Field rotation fixed, time cost:                          %9.2f" %(time.time()-tst) )
 
 # For all processes: if fix-rotation is required, then read rot_ang from file and 
 # reset the reference frame to the one with least rotation (frame already fixed)
@@ -393,6 +478,13 @@ if __name__ == '__main__':
     with mp.Pool(nproc) as pool:
         output = [pool.map(align_frames, range(n_files))]
     print("Initial alignment done, time cost:                        %9.2f" %(time.time()-tst))
+
+    output_arr = np.array(output)
+    sx1, sy1 = output_arr[0,:,1], output_arr[0,:,2]
+    sx1 = np.where(sx1 >  n1/2, sx1-n1, sx1)
+    sx1 = np.where(sx1 < -n1/2, sx1+n1, sx1)
+    sy1 = np.where(sy1 >  n2/2, sy1-n2, sy1)
+    sy1 = np.where(sy1 < -n2/2, sy1+n2, sy1)
 
     # identify the frame of maximum weight, and use it as the new reference frame.
     w = compute_weights(frames_working)
@@ -412,11 +504,21 @@ if __name__ == '__main__':
     
     # parse and record the offsets
     output_arr = np.array(output)
-    sx, sy = output_arr[0,:,1], output_arr[0,:,2]
-    sx = np.where(sx >  n1/2, sx-n1, sx)
-    sx = np.where(sx < -n1/2, sx+n1, sx)
-    sy = np.where(sy >  n2/2, sy-n2, sy)
-    sy = np.where(sy < -n2/2, sy+n2, sy)
+    sx2, sy2 = output_arr[0,:,1], output_arr[0,:,2]
+    sx2 = np.where(sx2 >  n1/2, sx2-n1, sx2)
+    sx2 = np.where(sx2 < -n1/2, sx2+n1, sx2)
+    sy2 = np.where(sy2 >  n2/2, sy2-n2, sy2)
+    sy2 = np.where(sy2 < -n2/2, sy2+n2, sy2)
+
+    # plot the XY-shifts
+    plt.figure(figsize=(5,4), dpi=200)
+    plt.title('XY shifts in pixel')
+    plt.xlabel('Y shifts', fontsize=9)
+    plt.ylabel('X shifts', fontsize=9)
+    plt.scatter(sx1, sy1, s=50, alpha=0.8, label='Round 1')
+    plt.scatter(sx2, sy2, s=50, alpha=0.8, label='Round 2')
+    plt.legend()
+    plt.savefig(os.path.join(working_dir,output_dir,'xy-shifts.pdf'))
     
     # recompute the weights
     tst = time.time()
@@ -435,71 +537,90 @@ if __name__ == '__main__':
         os.remove(file_rot_ang)
     
     # plot the weights for test 
-    plt.figure(figsize=(4,2),dpi=200)
+    plt.figure(figsize=(4,2), dpi=200)
     plt.title(r'Stacking weights ($w\times N_{frames}$)')
-    plt.xlabel('Frame number',fontsize=9)
-    plt.ylabel(r'$w\times N_{frames}$',fontsize=9)
+    plt.xlabel('Frame number', fontsize=9)
+    plt.ylabel(r'$w\times N_{frames}$', fontsize=9)
     w1 = np.where(w==0, np.nan, w)
     w2 = np.where(w==0, np.median(w), np.nan)
     plt.plot(w1*n_files, marker="o", label='Valid')
     plt.plot(w2*n_files, marker="*", label='Invalid')
     plt.legend()
-    plt.savefig('weights.pdf')
-    
-    # plot the XY-shifts
-    plt.figure(figsize=(4,2),dpi=200)
-    plt.title('XY shifts in pixel')
-    plt.xlabel('Y shifts',fontsize=9)
-    plt.ylabel('X shifts',fontsize=9)
-    plt.scatter(sx, sy, s=50, alpha=.5)
-    plt.savefig('xy-shifts.pdf')
+    plt.savefig(os.path.join(working_dir,output_dir,'weights.pdf'))
 
     # stack the frames with weights.
     tst = time.time()
     frame_stacked = np.dot(w, frames_working.reshape(n_files, n1*n2)).reshape(n1, n2)
+    hdu = fits.PrimaryHDU(frame_stacked.astype(raw_data_type))
+    hdu.writeto(os.path.join(working_dir,output_dir,final_file_fits), overwrite=True)
+    print("Stacked frame obtained from %i/%i best frames, time cost: %9.2f" 
+        %(n_files-n_bad, n_files, time.time()-tst))
+
     # normalize the stacked result to 0-65535.
     fmin = np.amin(frame_stacked)
     fmax = np.amax(frame_stacked)
     cache = (frame_stacked-fmin)/(fmax-fmin)
     tmax = 2.**(adc_digit_max) - 1.
     frame_stacked = np.floor(cache*tmax)
-    print("Stacked frame obtained from %i/%i best frames, time cost:  %9.2f" 
-        %(n_files-n_bad, n_files, time.time()-tst))
 
 
-    # adjust the color and make the final 8-bit image
     tst = time.time()
+    # stacked frame to linear rgb value (handle the Bayer matrix)
     rgb = frame2rgb_fits(frame_stacked)
-    r_bin_file = os.path.splitext(final_file)[0] + '.r'; rgb[:,:,0].tofile(r_bin_file)
-    g_bin_file = os.path.splitext(final_file)[0] + '.g'; rgb[:,:,1].tofile(g_bin_file)
-    b_bin_file = os.path.splitext(final_file)[0] + '.b'; rgb[:,:,2].tofile(b_bin_file)
+
+    rgb_modified, cdf = color_correction(rgb, rgb_gamma, rgb_max=rgb_max, bins=32000)
+
+    # save the 48-bit color image
+    imageio.imsave(os.path.join(working_dir,output_dir,final_file_tif), 
+        rgb_modified.astype(raw_data_type))
+
+    # show the 8-bit color image as a quick preview (lower quality)
+    if console==False:
+        plt.figure(figsize=(6,4),dpi=200)
+        plt.xlabel('Y',fontsize=12)
+        plt.ylabel('X',fontsize=12)
+        plt.imshow(np.uint8(rgb_modified/256))
+    print("****************************************************")
+    print("Final image obtained with colors corrected by modified histogram equalization")
+    print("Current color correction parameters: (r, g, b) ranges: %7i, %7i, %7i " 
+        %(rgb_max[0], rgb_max[1], rgb_max[2]))
+    print("Current color correction parameters: (r, g, b) gamma: %7.2f, %7.2f, %7.2f " 
+        %(rgb_gamma[0], rgb_gamma[1], rgb_gamma[2]))
     
-    # color correction in parallel
-    m1, m2, npix = np.shape(rgb)[0], np.shape(rgb)[1], rgb.size
-    tst = time.time()
-    ic = [0, 1, 2]
-    im1 = [m1, m1, m1]
-    im2 = [m2, m2, m2]
-    ifn = [r_bin_file, g_bin_file, b_bin_file]
-    dtp = [raw_data_type, raw_data_type, raw_data_type]
-    with mp.Pool(3) as pool:
-        output = [pool.starmap(adjust_color, zip(ic, im1, im2, ifn, dtp))]
+    # # adjust the color and make the final 8-bit image
+    # tst = time.time()
+    # rgb = frame2rgb_fits(frame_stacked)
 
-    # read the color correction result and save to 
-    rgb[:,:,0] = np.fromfile(r_bin_file, dtype=raw_data_type).reshape(m1, m2); os.remove(r_bin_file)
-    rgb[:,:,1] = np.fromfile(g_bin_file, dtype=raw_data_type).reshape(m1, m2); os.remove(g_bin_file)
-    rgb[:,:,2] = np.fromfile(b_bin_file, dtype=raw_data_type).reshape(m1, m2); os.remove(b_bin_file)
-    print("Color adjusted, time cost:                                %9.2f" %(time.time()-tst)); tst = time.time()
+    # r_bin_file = os.path.splitext(final_file_tif)[0] + '.r'; rgb[:,:,0].tofile(r_bin_file)
+    # g_bin_file = os.path.splitext(final_file_tif)[0] + '.g'; rgb[:,:,1].tofile(g_bin_file)
+    # b_bin_file = os.path.splitext(final_file_tif)[0] + '.b'; rgb[:,:,2].tofile(b_bin_file)
+    
+    # # color correction in parallel
+    # m1, m2, npix = np.shape(rgb)[0], np.shape(rgb)[1], rgb.size
+    # tst = time.time()
+    # ic = [0, 1, 2]
+    # im1 = [m1, m1, m1]
+    # im2 = [m2, m2, m2]
+    # ifn = [r_bin_file, g_bin_file, b_bin_file]
+    # dtp = [raw_data_type, raw_data_type, raw_data_type]
+    # with mp.Pool(3) as pool:
+    #     output = [pool.starmap(adjust_color, zip(ic, im1, im2, ifn, dtp))]
+
+    # # read the color correction result and save to 
+    # rgb[:,:,0] = np.fromfile(r_bin_file, dtype=raw_data_type).reshape(m1, m2); os.remove(r_bin_file)
+    # rgb[:,:,1] = np.fromfile(g_bin_file, dtype=raw_data_type).reshape(m1, m2); os.remove(g_bin_file)
+    # rgb[:,:,2] = np.fromfile(b_bin_file, dtype=raw_data_type).reshape(m1, m2); os.remove(b_bin_file)
+    # print("Color adjusted, time cost:                                %9.2f" %(time.time()-tst)); tst = time.time()
     
 
-    # save the final figure
-    imageio.imsave(final_file, np.uint8(rgb))
+    # # save the final figure
+    # imageio.imsave(final_file_tif, rgb.astype(raw_data_type))
 
-    # show the final figure
-    plt.figure(figsize=(6,4),dpi=200)
-    plt.xlabel('Y',fontsize=12)
-    plt.ylabel('X',fontsize=12)
-    plt.imshow(np.uint8(rgb/256))
+    # # show the final figure
+    # plt.figure(figsize=(6,4),dpi=200)
+    # plt.xlabel('Y',fontsize=12)
+    # plt.ylabel('X',fontsize=12)
+    # plt.imshow(np.uint8(rgb))
 
-    print("Done!")
+    # print("Done!")
 
