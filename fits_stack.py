@@ -12,6 +12,7 @@ import scipy.fft as fft
 import numpy as np
 import multiprocessing as mp
 import matplotlib.pyplot as plt
+import heapq as hp
 
 from scipy import ndimage
 from scipy.signal.windows import tukey
@@ -75,17 +76,10 @@ tukey_alpha = 0.02
 # If true, do not report the alignment result
 less_report = True
 
-# increase this value will amplify the corresponding color
-rgb_max = [64000,56000,64000]
-
-# increase this value will further increase the contrast
-rgb_gamma = [0.9, 0.8, 0.9]
-
-# Define the Bayer matrix format, only for the fits file
-bayer_matrix_format = cv2.COLOR_BayerBG2RGB
-
 # Number of ADC digit. The true maximum value should be 2**adc_digit. This should usualy be 16.
 adc_digit_max = 16
+
+vmax_global = 2**adc_digit_max - 1
 
 # field rotation ang file
 file_rot_ang = "field_rot_ang.bin"
@@ -124,12 +118,34 @@ def read_frame_fits(file):
     return frame, date_str, raw_data_type
 
 
-#
-# use the fits information to convert a frame to rgb image
-#
-def frame2rgb_fits(frame):
-    rgb = cv2.cvtColor(frame.astype(raw_data_type), bayer_matrix_format)
-    return rgb
+# make HDU with property cards
+def data2hdu(data, cards=None, primary=False):
+    # Make HDU
+    if primary:
+        hdu = fits.PrimaryHDU(data)
+    else:
+        hdu = fits.ImageHDU(data)
+    # Set property cards.read_fits
+    if cards != None:
+        hdr = hdu.header
+        for card in cards:
+            hdr.set(card[0], card[1], card[2])
+    return hdu
+
+
+# write fits file from a list of HDU
+def hdu2fits(list_of_hdu, file, overwrite=True):
+    hdu_list = fits.HDUList(list_of_hdu)
+    hdu_list.writeto(file, overwrite=overwrite)
+    hdu_list.close()
+
+
+# simple program to write array to fits file
+def write_fits_simple(list_of_data, file, overwrite=True):
+    list_of_hdu = [fits.PrimaryHDU(None)]
+    for data in list_of_data:
+        list_of_hdu.append(data2hdu(data))
+    hdu2fits(list_of_hdu, file, overwrite=overwrite)
 
 
 # 
@@ -188,43 +204,23 @@ def compute_weights(frames_working):
     return w
 
 
-import heapq as hp
-# subroutine for adjusting the colors 
-def adjust_color(i, m1, m2, bin_file, raw_data_type):
-    # number of "too dark" pixels and threshold
-    val_max = 2.**adc_digit_max
-    samp = np.fromfile(bin_file, dtype=raw_data_type).reshape(m1*m2)
-    npix = np.int64(m1)*np.int64(m2)
-    ndark = int(npix*dark_frac)
-    d1 = hp.nsmallest(ndark, samp)[ndark-1]*1.
-    # number of "too bright" pixels and threshold
-    nbright = int(npix*bright_frac)
-    d2 = hp.nlargest(nbright, samp)[nbright-1]*1.
-    # re-scaling, note that this requires 16-bit to save weak signal from bright sky-light
-    # note that val is expected to be in range [0,1]. Out-of-range values will be truncated.
-    val = np.float64(samp-d1)/np.float64(d2-d1)
-    val = np.where(val<=0, 1./val_max, val)
-    val = np.where(val >1, 1, val)
-    samp = (val**rgb_gamma[i])*val_max*rgb_fac[i]
-    samp = np.where(samp<      0,       0, samp)
-    samp = np.where(samp>val_max, val_max, samp)
-    samp.astype(raw_data_type).tofile(bin_file)
-
-
-def norm_array(x_in, xmin, xmax):
+# re-scale array (linear) to [vmin, vmax] 
+def rescale_array(x_in, vmin, vmax):
     x = x_in.copy()
-    x = np.where(x<xmin, xmin, x)
-    x = np.where(x>xmax, xmax, x)
-    x = np.float64(x-xmin)/np.float64(xmax-xmin)
+    xmin, xmax = np.amin(x), np.amax(x)
+    # first to range [0, 1]
+    x = np.float64(x-xmin) / np.float64(xmax-xmin)
+    # then to range [vmin, vmax]
+    x = x*(vmax-vmin) + vmin
     return x
 
 
 # manually adjust the rgb range
 def adjust_color_manual(rgb, rgb_min, rgb_max, rgb_gamma):
-    global_max = 2.**adc_digit_max-1
-    r = norm_array(rgb[:,:,0], rgb_min[0], rgb_max[0])
-    g = norm_array(rgb[:,:,1], rgb_min[1], rgb_max[1])
-    b = norm_array(rgb[:,:,2], rgb_min[2], rgb_max[2])
+    global_max = vmax_global
+    r = rescale_array(rgb[:,:,0], rgb_min[0], rgb_max[0])
+    g = rescale_array(rgb[:,:,1], rgb_min[1], rgb_max[1])
+    b = rescale_array(rgb[:,:,2], rgb_min[2], rgb_max[2])
     r = (r**rgb_gamma[0])*global_max
     g = (g**rgb_gamma[1])*global_max
     b = (b**rgb_gamma[2])*global_max
@@ -233,28 +229,6 @@ def adjust_color_manual(rgb, rgb_min, rgb_max, rgb_gamma):
     rgb_adjusted[:,:,1] = g
     rgb_adjusted[:,:,2] = b
     return rgb_adjusted
-
-
-# modifed histogram equalization that allows range and gamma correction
-def modified_hist_equal(array, gamma, val_max=64000, bins=2**(adc_digit_max-1)):
-    # get image histogram
-    hist, bins = np.histogram(array.flatten(), bins, density=True)
-    cdf = hist.cumsum()
-    cdf = (cdf/np.amax(cdf))**gamma
-    cdf = val_max * cdf
-    # use linear interpolation of cdf to find new pixel values
-    array_equal = np.interp(array.flatten(), bins[:-1], cdf)
-    return array_equal.reshape(array.shape), cdf
-
-
-# color correction using modified histogram qualization
-def color_correction(rgb, rgb_gamma, rgb_max=[64000,64000,64000], bins=2**(adc_digit_max-1)):
-    rgb_modified = rgb*0
-    for i in range(3):
-        x = rgb[:,:,i]
-        x, cdf = modified_hist_equal(x, rgb_gamma[i], val_max=rgb_max[i], bins=bins)
-        rgb_modified[:,:,i] = x
-    return rgb_modified, cdf
 
 
 # convert elevation and azimuth to unit vectors
@@ -267,8 +241,10 @@ def elaz2vec(el, az):
     vec[:,2] = np.sin(el*d2r)
     return vec
 
+
 def len_vec(vec):
     return np.sqrt(np.sum(vec*vec, axis=1))
+
 
 def unit_vec(vec):
     amp = len_vec(vec)
@@ -277,6 +253,7 @@ def unit_vec(vec):
     vec_nml[:,1] = vec_nml[:,1] / amp
     vec_nml[:,2] = vec_nml[:,2] / amp
     return vec_nml
+
 
 # Convert round angle to equivalent linear angles. The idea is: when the
 # difference between two neighbors is bigger than a threshold, all following
@@ -297,6 +274,7 @@ def round2linear(ang_in, deg=True, threshold=350):
             ang[i+1:n] = ang[i+1:n] + da1 - da
     return ang
 
+
 # compute the field rotation, return continuous angle, but can also return
 # arccos values by debug=True (discontinuous, only for debug)
 def compute_field_rot(target, hor_ref_frame, debug=False):
@@ -315,18 +293,19 @@ def compute_field_rot(target, hor_ref_frame, debug=False):
     east_cel = unit_vec(np.cross(vec_target, vec_north))
     east_hor = unit_vec(np.cross(vec_target, vec_z    ))
     # determine the hor-to-cel rotation direction (sign of rotation)
-    vec_hor2cel = np.cross(east_hor, east_cel)
-    flag = np.sum(vec_hor2cel*vec_target, axis=1)
+    vec_cel2hor = np.cross(east_cel, east_hor)
+    flag = np.sum(vec_cel2hor*vec_target, axis=1)
     flag = np.where(flag>0, 1, -1)
     # compute field rotation angle by atan2
     val_cos = np.sum(east_cel*east_hor, axis=1)
-    val_sin = len_vec(vec_hor2cel)
+    val_sin = len_vec(vec_cel2hor)
     rot_ang = np.arctan2(val_sin, val_cos)*180/np.pi
     # and determine the direction of rotation
     rot_ang = rot_ang * flag
     if debug==True:
         rot_ang = np.arccos(val_cos)*180/np.pi
     return rot_ang
+
 
 # note: need to check if we should multiply -1 to angle. 
 # note: the four Bayer blocks are rotated separately so as not to corrupt the Bayer matrix.
@@ -350,7 +329,19 @@ def fix_rotation(file, angle, raw_data_type, n1, n2):
     frame[:,1,:,1] = frame11
     frame.tofile(file)
 
-    
+
+# Re-scale the stacked frame values to avoid problem in type conversion to
+# uint16. Do it separately for the four Bayer matrices.
+def normalize_frame(frame, vmin, vmax):
+    frame_norm = frame.copy()
+    shape = np.shape(frame_norm)
+    n1, n2 = shape[0], shape[1]
+    frame_norm = frame_norm.reshape(int(n1/2), 2, int(n2/2), 2)
+    frame_norm[:,0,:,0] = rescale_array(frame_norm[:,0,:,0], vmin, vmax)
+    frame_norm[:,0,:,1] = rescale_array(frame_norm[:,0,:,1], vmin, vmax)
+    frame_norm[:,1,:,0] = rescale_array(frame_norm[:,1,:,0], vmin, vmax)
+    frame_norm[:,1,:,1] = rescale_array(frame_norm[:,1,:,1], vmin, vmax)
+    return frame_norm.reshape(n1, n2)
     
     
     
@@ -441,7 +432,7 @@ if __name__ == '__main__' and do_fix_ratation==True:
     # compute the absolute field rotation angles as "rot_ang"
     rot_ang = compute_field_rot(target, hor_ref_frame)
     rot_ang = rot_ang - np.median(rot_ang)
-    rot_ang.astype(working_precision).tofile(file_rot_ang)
+    rot_ang.astype(working_precision).tofile(os.path.join(working_dir,output_dir,file_rot_ang))
     print("Rotation angles computed, time cost:                      %9.2f" %(time.time()-tst))
 
     # plot the field rotation angle for test 
@@ -468,7 +459,7 @@ if __name__ == '__main__' and do_fix_ratation==True:
 # For all processes: if fix-rotation is required, then read rot_ang from file and 
 # reset the reference frame to the one with least rotation (frame already fixed)
 if do_fix_ratation==True:
-    rot_ang = np.fromfile(file_rot_ang, dtype=working_precision)
+    rot_ang = np.fromfile(os.path.join(working_dir,output_dir,file_rot_ang), dtype=working_precision)
     wid = np.argmin(np.abs(rot_ang))
     ref_frame = np.fromfile(file_swp[wid], dtype=raw_data_type).reshape(n1, n2)
     ref_fft = np.conjugate(fft.fft2((ref_frame*win).astype(working_precision)))
@@ -531,11 +522,6 @@ if __name__ == '__main__':
     w = w / np.sum(w)
     print("Final weights computed, time cost:                        %9.2f" %(time.time()-tst))
     
-    for file in file_swp:
-        os.remove(file)
-    if do_fix_ratation==True:
-        os.remove(file_rot_ang)
-    
     # plot the weights for test 
     plt.figure(figsize=(4,2), dpi=200)
     plt.title(r'Stacking weights ($w\times N_{frames}$)')
@@ -551,41 +537,47 @@ if __name__ == '__main__':
     # stack the frames with weights.
     tst = time.time()
     frame_stacked = np.dot(w, frames_working.reshape(n_files, n1*n2)).reshape(n1, n2)
-    hdu = fits.PrimaryHDU(frame_stacked.astype(raw_data_type))
-    hdu.writeto(os.path.join(working_dir,output_dir,final_file_fits), overwrite=True)
+
+    # normalize the stacked frames to avoid negative values (due to subtraction of mean values).
+    frame_stacked = normalize_frame( frame_stacked, 0, vmax_global )
+
+    file_stacked = os.path.join(working_dir,output_dir,final_file_fits)
+    write_fits_simple([frame_stacked.astype(raw_data_type)], file_stacked, overwrite=True)
+
     print("Stacked frame obtained from %i/%i best frames, time cost: %9.2f" 
         %(n_files-n_bad, n_files, time.time()-tst))
 
-    # normalize the stacked result to 0-65535.
-    fmin = np.amin(frame_stacked)
-    fmax = np.amax(frame_stacked)
-    cache = (frame_stacked-fmin)/(fmax-fmin)
-    tmax = 2.**(adc_digit_max) - 1.
-    frame_stacked = np.floor(cache*tmax)
+    # clear swap files
+    for file in file_swp:
+        os.remove(file)
+
+    print("Done!")
 
 
-    tst = time.time()
-    # stacked frame to linear rgb value (handle the Bayer matrix)
-    rgb = frame2rgb_fits(frame_stacked)
 
-    rgb_modified, cdf = color_correction(rgb, rgb_gamma, rgb_max=rgb_max, bins=32000)
 
-    # save the 48-bit color image
-    imageio.imsave(os.path.join(working_dir,output_dir,final_file_tif), 
-        rgb_modified.astype(raw_data_type))
+    # tst = time.time()
+    # # stacked frame to linear rgb value (handle the Bayer matrix)
+    # rgb = frame2rgb_fits(frame_stacked)
 
-    # show the 8-bit color image as a quick preview (lower quality)
-    if console==False:
-        plt.figure(figsize=(6,4),dpi=200)
-        plt.xlabel('Y',fontsize=12)
-        plt.ylabel('X',fontsize=12)
-        plt.imshow(np.uint8(rgb_modified/256))
-    print("****************************************************")
-    print("Final image obtained with colors corrected by modified histogram equalization")
-    print("Current color correction parameters: (r, g, b) ranges: %7i, %7i, %7i " 
-        %(rgb_max[0], rgb_max[1], rgb_max[2]))
-    print("Current color correction parameters: (r, g, b) gamma: %7.2f, %7.2f, %7.2f " 
-        %(rgb_gamma[0], rgb_gamma[1], rgb_gamma[2]))
+    # rgb_modified, cdf = color_correction(rgb, rgb_gamma, rgb_max=rgb_max, bins=32000)
+
+    # # save the 48-bit color image
+    # imageio.imsave(os.path.join(working_dir,output_dir,final_file_tif), 
+    #     rgb_modified.astype(raw_data_type))
+
+    # # show the 8-bit color image as a quick preview (lower quality)
+    # if console==False:
+    #     plt.figure(figsize=(6,4),dpi=200)
+    #     plt.xlabel('Y',fontsize=12)
+    #     plt.ylabel('X',fontsize=12)
+    #     plt.imshow(np.uint8(rgb_modified/256))
+    # print("****************************************************")
+    # print("Final image obtained with colors corrected by modified histogram equalization")
+    # print("Current color correction parameters: (r, g, b) ranges: %7i, %7i, %7i " 
+    #     %(rgb_max[0], rgb_max[1], rgb_max[2]))
+    # print("Current color correction parameters: (r, g, b) gamma: %7.2f, %7.2f, %7.2f " 
+    #     %(rgb_gamma[0], rgb_gamma[1], rgb_gamma[2]))
     
     # # adjust the color and make the final 8-bit image
     # tst = time.time()
@@ -622,5 +614,25 @@ if __name__ == '__main__':
     # plt.ylabel('X',fontsize=12)
     # plt.imshow(np.uint8(rgb))
 
-    # print("Done!")
 
+# import heapq as hp
+# # subroutine for adjusting the colors 
+# def adjust_color(i, m1, m2, bin_file, raw_data_type):
+#     # number of "too dark" pixels and threshold
+#     val_max = vmax_global
+#     samp = np.fromfile(bin_file, dtype=raw_data_type).reshape(m1*m2)
+#     npix = np.int64(m1)*np.int64(m2)
+#     ndark = int(npix*dark_frac)
+#     d1 = hp.nsmallest(ndark, samp)[ndark-1]*1.
+#     # number of "too bright" pixels and threshold
+#     nbright = int(npix*bright_frac)
+#     d2 = hp.nlargest(nbright, samp)[nbright-1]*1.
+#     # re-scaling, note that this requires 16-bit to save weak signal from bright sky-light
+#     # note that val is expected to be in range [0,1]. Out-of-range values will be truncated.
+#     val = np.float64(samp-d1)/np.float64(d2-d1)
+#     val = np.where(val<=0, 1./val_max, val)
+#     val = np.where(val >1, 1, val)
+#     samp = (val**rgb_gamma[i])*val_max*rgb_fac[i]
+#     samp = np.where(samp<      0,       0, samp)
+#     samp = np.where(samp>val_max, val_max, samp)
+#     samp.astype(raw_data_type).tofile(bin_file)
