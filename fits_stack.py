@@ -3,12 +3,14 @@
 
 ##############################################################
 # Stack the images in fits files.
-# Define input parameters
 ##############################################################
 
-import os, imageio, cv2, time, sys, matplotlib
 
-import scipy.fft as fft
+##############################################################
+# Define input parameters
+##############################################################
+import os, cv2, time, sys, matplotlib
+
 import numpy as np
 import multiprocessing as mp
 import matplotlib.pyplot as plt
@@ -25,43 +27,55 @@ import astropy.units as u
 
 # longitude, latitude, height and time zone of the AHU observatory
 # and define the location object of the AHU observatory
-ahu_lon = 117.21    # needs to be updated
-ahu_lat = 31.84     # needs to be updated
-ahu_height = 63.00  # needs to be updated
+ahu_lon = 117.21  # needs to be updated
+ahu_lat = 31.84   # needs to be updated
+ahu_alt = 63.00   # needs to be updated
 ahu_zone = +8
-ahu_observatory = EarthLocation(lon=ahu_lon*u.deg, lat=ahu_lat*u.deg, height=ahu_height*u.m)
+ahu_observatory = EarthLocation(lon=ahu_lon*u.deg, lat=ahu_lat*u.deg, height=ahu_alt*u.m)
 
 # Define observation target, either in name or in ra-dec.
 # in name, use (for example): target = SkyCoord.from_name("m31"); 
 # in ra-dec, use (for example): target = SkyCoord(ra=45*u.deg, dec=45*u.deg)
-target = SkyCoord.from_name("m42")
+target = SkyCoord(ra=83.82208333*u.deg, dec=-5.39111111*u.deg)
+# target = SkyCoord.from_name("m42")
 
-# Working directory, all raw or fits files should be in this directory
-working_dir = "/work/astro/fits"
+# If true, work in console mode, will not process the Jupyter notebook code
+# and will not produce online images.
+console = True
+
+# Working directory, all raw or fits files should be in this directory. Will
+# be overwritten by the command-line parameter.
+working_dir = "./fits"
+
+# Define the input file extension. All files in the working directory with
+# this extension will be used. Will be overwritten by the command-line
+# parameter.
+extension = "fits"
+
+# Define the maximum number of processes to be used. Will be overwritten by
+# the command-line parameter.
+nproc_max = int(mp.cpu_count()/2)
+
+# Fraction of frames that will not be used
+bad_fraction = 0.3
 
 output_dir = "output"
 
-# Specify whether or not to fix the field rotation (needs the observation time, target and site locations). 
-# For an Alt-az mount, this is necessary, but for an equatorial mount this is unnecessary.
+# Specify whether or not to fix the field rotation (needs the observation
+# time, target and site locations). For an Alt-az mount, this is necessary,
+# but for an equatorial mount this is unnecessary.
 do_fix_ratation = False
 
-# Define the input file extension. All files in the working directory with this extension will be used.
-extension = "fits"
-
 # Page number of data in the fits file
-page_num = 0
+page_num = 1
 
 # Tag for the obs. date and time string (for fits file)
-date_tag = 'DATE-OBS'
+# date_tag = 'DATE-OBS'
+date_tag = 'Date'
 
-# If true, work in console mode, will not process the Jupyter notebook code and will not produce online images.
-console = False
-
-# Define the maximum number of processes to be used
-nproc_max = 96
-
-# Fraction of frames that will not be used
-bad_fraction = 0.6
+# 2D High-pass cut frequency as a fraction of the Nyquist frequency. Only for
+# alignment to reduce background impacts. Will not affect the frames.
+highpass_cut = 0.01
 
 # Save aligned binary files or not. Note that for multiprocessing, this must be True
 save_aligned_binary = False
@@ -71,12 +85,12 @@ save_aligned_image = False
 
 # Tukey window alpha parameter, used to improve the matched filtering
 # for example, 0.04 means 2% at each edge (left, right, top, bottom) is suppressed
-tukey_alpha = 0.02
+tukey_alpha = 0.04
 
 # If true, do not report the alignment result
 less_report = True
 
-# Number of ADC digit. The true maximum value should be 2**adc_digit. This should usualy be 16.
+# Number of ADC digit. The true maximum value should be 2**adc_digit. This should usualLy be 16.
 adc_digit_max = 16
 
 vmax_global = 2**adc_digit_max - 1
@@ -91,7 +105,7 @@ final_file_tif = "final.tiff"
 final_file_fits = "frame_stacked.fits"
 
 # Working precision takes effect in FFT and matrix multiplication
-working_precision = "float64"
+working_precision = "float32"
 
 
 
@@ -148,17 +162,24 @@ def write_fits_simple(list_of_data, file, overwrite=True):
     hdu2fits(list_of_hdu, file, overwrite=overwrite)
 
 
-# 
+# compute 2d real FFT frequencies as a fraction of the Nyquist frequency
+def rfft2_freq(n1, n2):
+    n2r = n2//2 + 1
+    f1 = np.repeat(np.fft.fftfreq(n1), n2r).reshape(n1,n2r)
+    f2 = np.repeat(np.fft.rfftfreq(n2),n1).reshape(n2r,n1).transpose()
+    f = np.sqrt(f1**2 + f2**2)
+    return f
+
+
 # align a frame to the reference frame
-# 
 def align_frames(i):
     tst = time.time()
     # read the raw data as an object, obtain the image and compute its fft
     frame = np.fromfile(file_swp[i], dtype=raw_data_type).reshape(n1, n2)
-    frame_fft = fft.fft2((frame*win).astype(working_precision))
+    frame_fft = np.fft.rfft2((frame*win).astype(working_precision))
     
     # compute the frame offset
-    cache = np.abs(fft.ifft2(ref_fft*frame_fft))
+    cache = np.abs(np.fft.irfft2(ref_fft*frame_fft))
     index = np.unravel_index(np.argmax(cache, axis=None), cache.shape)
     s1, s2 = -index[0], -index[1]
     
@@ -353,33 +374,46 @@ def normalize_frame(frame, vmin, vmax):
 ##############################################################
 # Do the following:
 # 1. Align the frames using the initial reference frame.
-# 2. Compute the weights from covarinace matrix.
+# 2. Compute the weights from the covarinace matrix.
 # 3. Set the reference frame to the one with highest weight.
-# 4. Align the frames again using the new reference frame.
-# 5. Re-compute the weights from covarinace matrix.
-# 6. Stack with weights.
-# 7. Adjust the color
+# 4. Re-align the frames using the new reference frame.
+# 5. Re-compute the weights from the covarinace matrix.
+# 6. Stack the frames with weights.
 ##############################################################
 
+
+# in console mode, do not produce online images (but will save pdf)
 if console == True:
-    # do not produce online images (but will still save pdf)
     matplotlib.use('Agg')
+    if len(sys.argv)==4:
+        working_dir = sys.argv[1]
+        extension = sys.argv[2]
+        nproc_max = int(sys.argv[3])
+    else:
+        print("Warning: command-line parameters less than 3, will use the default ones instead:")
+        print("Working directory:         %s" %(working_dir))
+        print("Input file extension:      %s" %(extension))
+        print("Number of processes limit: %s" %(nproc_max))
 else:
     # Improve the display effect of Jupyter notebook
     from IPython.core.display import display, HTML
-    display(HTML("<style>.container { width:95% !important; }</style>"))
 
 # make a list of woking files and determine the number of processes to be used
 os.chdir(working_dir)
+fullpath = os.path.abspath("./")    
 if not os.path.isdir(output_dir):
     os.mkdir(output_dir)
 
-file_lst, file_swp, file_bin, file_tif = [], [], [], []
+file_lst, file_swp = [], []
 for file in os.listdir():
     if file.endswith(extension):
         file_lst.append(file)
 
 n_files = np.int64(len(file_lst))
+if n_files<2:
+    print("Too few files, maybe check the directory name or extension?")
+    os.exit()
+
 if nproc_max > n_files:
     nproc = n_files
 else:
@@ -389,8 +423,6 @@ else:
 file_lst.sort()
 for file in file_lst:
     file_swp.append(os.path.splitext(file)[0] + '.swp')
-    file_bin.append(os.path.splitext(file)[0] + '.bin')
-    file_tif.append(os.path.splitext(file)[0] + '.tif')
 
 # use the first file as the initial reference file
 ref_frame, _, raw_data_type = read_frame_fits(file_lst[0]) 
@@ -401,7 +433,13 @@ n2 = np.int64(np.shape(ref_frame)[1])
 w1 = tukey(n1, alpha=tukey_alpha)
 w2 = tukey(n2, alpha=tukey_alpha)
 win = np.dot(w1.reshape(n1, 1), w2.reshape(1, n2))
-ref_fft = np.conjugate(fft.fft2((ref_frame*win).astype(working_precision)))
+
+# make a low-pass window in the Fourier domain
+freq = rfft2_freq(n1, n2)
+mask_hp = np.where(freq<highpass_cut, 0., 1.)
+
+ref_fft = np.conjugate(np.fft.rfft2((ref_frame*win).astype(working_precision)))
+ref_fft = ref_fft * mask_hp
 
 # read the frames by main
 if __name__ == '__main__':
@@ -432,7 +470,8 @@ if __name__ == '__main__' and do_fix_ratation==True:
     # compute the absolute field rotation angles as "rot_ang"
     rot_ang = compute_field_rot(target, hor_ref_frame)
     rot_ang = rot_ang - np.median(rot_ang)
-    rot_ang.astype(working_precision).tofile(os.path.join(working_dir,output_dir,file_rot_ang))
+    file = os.path.join(fullpath,outputdir,file_rot_ang)
+    rot_ang.astype(working_precision).tofile(file)
     print("Rotation angles computed, time cost:                      %9.2f" %(time.time()-tst))
 
     # plot the field rotation angle for test 
@@ -459,10 +498,12 @@ if __name__ == '__main__' and do_fix_ratation==True:
 # For all processes: if fix-rotation is required, then read rot_ang from file and 
 # reset the reference frame to the one with least rotation (frame already fixed)
 if do_fix_ratation==True:
-    rot_ang = np.fromfile(os.path.join(working_dir,output_dir,file_rot_ang), dtype=working_precision)
+    file = os.path.join(fullpath,output_dir,file_rot_ang)
+    rot_ang = np.fromfile(file, dtype=working_precision)
     wid = np.argmin(np.abs(rot_ang))
     ref_frame = np.fromfile(file_swp[wid], dtype=raw_data_type).reshape(n1, n2)
-    ref_fft = np.conjugate(fft.fft2((ref_frame*win).astype(working_precision)))
+    ref_fft = np.conjugate(np.fft.rfft2((ref_frame*win).astype(working_precision)))
+    ref_fft = ref_fft * mask_hp
     
 if __name__ == '__main__':    
     tst = time.time()
@@ -481,7 +522,8 @@ if __name__ == '__main__':
     w = compute_weights(frames_working)
     wid = np.argmax(w)
     ref_frame = np.fromfile(file_swp[wid], dtype=raw_data_type).reshape(n1, n2)
-    ref_fft = np.conjugate(fft.fft2((ref_frame*win).astype(working_precision)))
+    ref_fft = np.conjugate(np.fft.rfft2((ref_frame*win).astype(working_precision)))
+    ref_fft = ref_fft * mask_hp
     print("****************************************************")
     print("Frame %i is chosen as the new reference frame. All frames will be re-aligned." %(wid))
     print("The new reference file is: %s" %(file_lst[wid]))
@@ -506,10 +548,11 @@ if __name__ == '__main__':
     plt.title('XY shifts in pixel')
     plt.xlabel('Y shifts', fontsize=9)
     plt.ylabel('X shifts', fontsize=9)
-    plt.scatter(sx1, sy1, s=50, alpha=0.8, label='Round 1')
-    plt.scatter(sx2, sy2, s=50, alpha=0.8, label='Round 2')
+    TT = np.float64(np.arange(n_files))/n_files
+    plt.scatter(sx1, sy1, s=50, c=TT, cmap='viridis', alpha=0.8, label='Round 1')
+    plt.scatter(sx2, sy2, s=50, c='k', alpha=0.8, label='Round 2')
     plt.legend()
-    plt.savefig(os.path.join(working_dir,output_dir,'xy-shifts.pdf'))
+    plt.savefig(os.path.join(fullpath,output_dir,'xy-shifts.pdf'))
     
     # recompute the weights
     tst = time.time()
@@ -528,11 +571,11 @@ if __name__ == '__main__':
     plt.xlabel('Frame number', fontsize=9)
     plt.ylabel(r'$w\times N_{frames}$', fontsize=9)
     w1 = np.where(w==0, np.nan, w)
-    w2 = np.where(w==0, np.median(w), np.nan)
-    plt.plot(w1*n_files, marker="o", label='Valid')
-    plt.plot(w2*n_files, marker="*", label='Invalid')
-    plt.legend()
-    plt.savefig(os.path.join(working_dir,output_dir,'weights.pdf'))
+    w2 = np.where(w==0, np.nanmean(w1), np.nan)
+    plt.plot(w1*n_files*(1-bad_fraction), marker="o", label='Valid')
+    plt.plot(w2*n_files*(1-bad_fraction), marker="*", label='Invalid')
+    plt.legend(loc='upper left')
+    plt.savefig(os.path.join(fullpath,output_dir,'weights.pdf'))
 
     # stack the frames with weights.
     tst = time.time()
@@ -541,7 +584,7 @@ if __name__ == '__main__':
     # normalize the stacked frames to avoid negative values (due to subtraction of mean values).
     frame_stacked = normalize_frame( frame_stacked, 0, vmax_global )
 
-    file_stacked = os.path.join(working_dir,output_dir,final_file_fits)
+    file_stacked = os.path.join(fullpath,output_dir,final_file_fits)
     write_fits_simple([frame_stacked.astype(raw_data_type)], file_stacked, overwrite=True)
 
     print("Stacked frame obtained from %i/%i best frames, time cost: %9.2f" 

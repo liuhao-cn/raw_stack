@@ -8,18 +8,18 @@ rgb_max = [65535,65535,65535]
 
 rgb_min = [0, 0, 0]
 
-rgb_nbins = list(np.array(rgb_max) - np.array(rgb_min) + 1)
+rgb_nbins = [2048, 2048, 2048] # list(np.array(rgb_max) - np.array(rgb_min) + 1)
 
-show_image = True
+show_image = False
 
 # increase this value will increase the contrast
-rgb_gamma = [1, 0.9, 1]
+rgb_gamma = [24, 24, 24]
 
 # The bayer matrix format
 bayer_matrix_format = cv2.COLOR_BayerBG2RGB
 # bayer_matrix_format = cv2.COLOR_BayerBG2GRAY
 
-working_dir = "e:/astro"
+working_dir = "/work/astro/fits1/output"
 
 file_stacked = "frame_stacked.fits"
 
@@ -41,18 +41,19 @@ def read_fits(file):
 # do histogram equalization and gamma correction for one channel
 def hist_equal_gamma(array, vmin, vmax, nbins, gamma):
     # get image histogram
-    hist, bins = np.histogram(array.flatten(), nbins, density=True)
+    array_op = array.flatten()
+    hist, bins = np.histogram(array_op, nbins, density=True)
     cdf = hist.cumsum()
     cdf = cdf/np.amax(cdf)
     # use linear interpolation of cdf to find new pixel values
-    array_equal = np.interp(array.flatten(), bins[:-1], cdf)
+    array_op = np.interp(array_op, bins[:-1], cdf)
     if gamma != 1:
         x1 = np.linspace(0, 1, num=nbins)
         cdf1 = x1**(gamma)
-        array_equal = np.interp(array_equal.flatten(), x1, cdf1)
-    return array_equal.reshape(array.shape)*(vmax-vmin) + vmin
+        array_op = np.interp(array_op, x1, cdf1)
+    return array_op.reshape(array.shape)*(vmax-vmin) + vmin
 
-# do histogram equalization and gamma correction for a frame
+# do histogram equalization and gamma correction for a frame 
 def color_correction(rgb, vmin, vmax, nbins, gamma):
     rgb_corrected = rgb*0
     for i in range(3):
@@ -72,9 +73,11 @@ tst = time.time()
 rgb = cv2.cvtColor(frame_stacked.astype(raw_data_type), bayer_matrix_format)
 print("Stacked frame converted to RGB image, time cost: %9.2f" %(time.time()-tst))
 
+# color correction
 tst = time.time()
 rgb_corrected = color_correction(rgb, rgb_min, rgb_max, rgb_nbins, rgb_gamma)
 print("Color correction doen,                time cost: %9.2f" %(time.time()-tst))
+
 print("Current color correction parameters: (r, g, b) ranges: %7i, %7i, %7i " 
     %(rgb_max[0], rgb_max[1], rgb_max[2]))
 print("Current color correction parameters: (r, g, b) gamma: %7.2f, %7.2f, %7.2f " 
