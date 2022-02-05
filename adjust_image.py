@@ -1,25 +1,32 @@
 import cv2, os, imageio, time
 import numpy as np
+import multiprocessing as mp
 import astropy.io.fits as fits
 import matplotlib.pyplot as plt
 
 # decrease this value will amplify the corresponding color
-rgb_max = [65535,65535,65535]
+rgb_vmax = [65535, 65535, 65535]
 
-rgb_min = [0, 0, 0]
+rgb_vmin = [0, 0, 0]
 
-rgb_nbins = [2048, 2048, 2048] # list(np.array(rgb_max) - np.array(rgb_min) + 1)
+rgb_nbins = [4096, 4096, 4096]
 
-show_image = False
+# Fractional horizontal and vertial clips, from the upper-left corner.
+vertical_clip = [0.1, 0.7]
+
+horizontal_clip = [0.05, 0.8]
+
+show_image = True
 
 # increase this value will increase the contrast
-rgb_gamma = [24, 24, 24]
+g = 2
+rgb_gamma = [g, g, g]
 
 # The bayer matrix format
 bayer_matrix_format = cv2.COLOR_BayerBG2RGB
 # bayer_matrix_format = cv2.COLOR_BayerBG2GRAY
 
-working_dir = "/work/astro/fits1/output"
+working_dir = "E:/astro/temp"
 
 file_stacked = "frame_stacked.fits"
 
@@ -39,47 +46,54 @@ def read_fits(file):
     return data_list, hdr_list
 
 # do histogram equalization and gamma correction for one channel
-def hist_equal_gamma(array, vmin, vmax, nbins, gamma):
+def hist_equal_gamma(i):
     # get image histogram
-    array_op = array.flatten()
-    hist, bins = np.histogram(array_op, nbins, density=True)
+    array = rgb[:,:,i]
+    hist, bins = np.histogram(array.flatten(), rgb_nbins[i], density=True)
     cdf = hist.cumsum()
     cdf = cdf/np.amax(cdf)
     # use linear interpolation of cdf to find new pixel values
-    array_op = np.interp(array_op, bins[:-1], cdf)
-    if gamma != 1:
-        x1 = np.linspace(0, 1, num=nbins)
-        cdf1 = x1**(gamma)
-        array_op = np.interp(array_op, x1, cdf1)
-    return array_op.reshape(array.shape)*(vmax-vmin) + vmin
-
-# do histogram equalization and gamma correction for a frame 
-def color_correction(rgb, vmin, vmax, nbins, gamma):
-    rgb_corrected = rgb*0
-    for i in range(3):
-        rgb_corrected[:,:,i] = hist_equal_gamma(rgb[:,:,i], vmin[i], vmax[i], nbins[i], gamma=gamma[i])
-    return rgb_corrected.astype(raw_data_type)
+    array_equal = np.interp(array.flatten(), bins[:-1], cdf)
+    if rgb_gamma[i] != 1:
+        x1 = np.linspace(0, 1, num=rgb_nbins[i])
+        cdf1 = x1**(rgb_gamma[i])
+        array_equal = np.interp(array_equal, x1, cdf1)
+    buff = array_equal.reshape(n1, n2)*(rgb_vmax[i]-rgb_vmin[i]) + rgb_vmin[i]
+    rgb_corrected[:,:,i] = buff
+#     rgb_corrected[:,:,i] = buff
 
 
 os.chdir(working_dir)
 
 frame_stacked, _ = read_fits(file_stacked)
 frame_stacked = frame_stacked[1]
-
 frame_stacked = frame_stacked - np.amin(frame_stacked)
+
+shape = frame_stacked.shape
+n1, n2 = shape[0], shape[1]
+print(n1, n2)
+v1, v2 = int((n1*vertical_clip[0])//2*2), int((n1*vertical_clip[1])//2*2)
+h1, h2 = int((n2*horizontal_clip[0])//2*2), int((n2*horizontal_clip[1])//2*2)
+frame_stacked = frame_stacked[v1:v2, h1:h2]
+n1, n2 = v2-v1, h2-h1
+
+print(v1, v2, h1, h2, n1, n2)
 
 # stacked frame to linear rgb values (only handle the Bayer matrix)
 tst = time.time()
 rgb = cv2.cvtColor(frame_stacked.astype(raw_data_type), bayer_matrix_format)
 print("Stacked frame converted to RGB image, time cost: %9.2f" %(time.time()-tst))
 
-# color correction
-tst = time.time()
-rgb_corrected = color_correction(rgb, rgb_min, rgb_max, rgb_nbins, rgb_gamma)
-print("Color correction doen,                time cost: %9.2f" %(time.time()-tst))
+# rgb = np.where(rgb>8000, 8000, rgb)
 
+tst = time.time()
+rgb_corrected = rgb*0
+for i in range(3):
+    hist_equal_gamma(i)
+
+print("Color correction doen,                time cost: %9.2f" %(time.time()-tst))
 print("Current color correction parameters: (r, g, b) ranges: %7i, %7i, %7i " 
-    %(rgb_max[0], rgb_max[1], rgb_max[2]))
+    %(rgb_vmax[0], rgb_vmax[1], rgb_vmax[2]))
 print("Current color correction parameters: (r, g, b) gamma: %7.2f, %7.2f, %7.2f " 
     %(rgb_gamma[0], rgb_gamma[1], rgb_gamma[2]))
 

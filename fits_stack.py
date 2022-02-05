@@ -57,7 +57,7 @@ extension = "fits"
 nproc_max = int(mp.cpu_count()/2)
 
 # Fraction of frames that will not be used
-bad_fraction = 0.3
+bad_fraction = 0.1
 
 output_dir = "output"
 
@@ -67,25 +67,29 @@ output_dir = "output"
 do_fix_ratation = False
 
 # Page number of data in the fits file
-page_num = 1
+page_num = 0
 
 # Tag for the obs. date and time string (for fits file)
 # date_tag = 'DATE-OBS'
-date_tag = 'Date'
+date_tag = 'DATE-OBS'
 
 # 2D High-pass cut frequency as a fraction of the Nyquist frequency. Only for
 # alignment to reduce background impacts. Will not affect the frames.
 highpass_cut = 0.01
+
+# Tukey window alpha parameter, used to improve the matched filtering for
+# example, 0.04 means 2% at each edge (left, right, top, bottom) is suppressed
+# Note that this should match the maximum shifts
+tukey_alpha = 0.2
+
+# sigma of Gaussian filtering (smoothing), only for alignment.
+gauss_sigma = 8
 
 # Save aligned binary files or not. Note that for multiprocessing, this must be True
 save_aligned_binary = False
 
 # Save aligned images?
 save_aligned_image = False
-
-# Tukey window alpha parameter, used to improve the matched filtering
-# for example, 0.04 means 2% at each edge (left, right, top, bottom) is suppressed
-tukey_alpha = 0.04
 
 # If true, do not report the alignment result
 less_report = True
@@ -171,15 +175,19 @@ def rfft2_freq(n1, n2):
     return f
 
 
+def pre_process(frame):
+    return ndimage.gaussian_filter(frame, sigma=gauss_sigma).astype(working_precision)
+
+
 # align a frame to the reference frame
 def align_frames(i):
     tst = time.time()
     # read the raw data as an object, obtain the image and compute its fft
     frame = np.fromfile(file_swp[i], dtype=raw_data_type).reshape(n1, n2)
-    frame_fft = np.fft.rfft2((frame*win).astype(working_precision))
+    frame_fft = np.fft.rfft2(pre_process(frame*win))
     
     # compute the frame offset
-    cache = np.abs(np.fft.irfft2(ref_fft*frame_fft))
+    cache = np.abs(np.fft.irfft2((ref_fft*frame_fft*mask_hp).astype("complex64")))
     index = np.unravel_index(np.argmax(cache, axis=None), cache.shape)
     s1, s2 = -index[0], -index[1]
     
@@ -398,7 +406,7 @@ else:
     # Improve the display effect of Jupyter notebook
     from IPython.core.display import display, HTML
 
-# make a list of woking files and determine the number of processes to be used
+# make a list of working files and determine the number of processes to be used
 os.chdir(working_dir)
 fullpath = os.path.abspath("./")    
 if not os.path.isdir(output_dir):
@@ -412,7 +420,7 @@ for file in os.listdir():
 n_files = np.int64(len(file_lst))
 if n_files<2:
     print("Too few files, maybe check the directory name or extension?")
-    os.exit()
+    sys.exit()
 
 if nproc_max > n_files:
     nproc = n_files
@@ -436,9 +444,9 @@ win = np.dot(w1.reshape(n1, 1), w2.reshape(1, n2))
 
 # make a low-pass window in the Fourier domain
 freq = rfft2_freq(n1, n2)
-mask_hp = np.where(freq<highpass_cut, 0., 1.)
+mask_hp = np.where(freq<highpass_cut, 0, 1)
 
-ref_fft = np.conjugate(np.fft.rfft2((ref_frame*win).astype(working_precision)))
+ref_fft = np.conjugate(np.fft.rfft2(pre_process(ref_frame*win)))
 ref_fft = ref_fft * mask_hp
 
 # read the frames by main
@@ -502,7 +510,7 @@ if do_fix_ratation==True:
     rot_ang = np.fromfile(file, dtype=working_precision)
     wid = np.argmin(np.abs(rot_ang))
     ref_frame = np.fromfile(file_swp[wid], dtype=raw_data_type).reshape(n1, n2)
-    ref_fft = np.conjugate(np.fft.rfft2((ref_frame*win).astype(working_precision)))
+    ref_fft = np.conjugate(np.fft.rfft2(pre_process(ref_frame*win)))
     ref_fft = ref_fft * mask_hp
     
 if __name__ == '__main__':    
@@ -522,7 +530,7 @@ if __name__ == '__main__':
     w = compute_weights(frames_working)
     wid = np.argmax(w)
     ref_frame = np.fromfile(file_swp[wid], dtype=raw_data_type).reshape(n1, n2)
-    ref_fft = np.conjugate(np.fft.rfft2((ref_frame*win).astype(working_precision)))
+    ref_fft = np.conjugate(np.fft.rfft2(pre_process(ref_frame*win)))
     ref_fft = ref_fft * mask_hp
     print("****************************************************")
     print("Frame %i is chosen as the new reference frame. All frames will be re-aligned." %(wid))
@@ -574,7 +582,7 @@ if __name__ == '__main__':
     w2 = np.where(w==0, np.nanmean(w1), np.nan)
     plt.plot(w1*n_files*(1-bad_fraction), marker="o", label='Valid')
     plt.plot(w2*n_files*(1-bad_fraction), marker="*", label='Invalid')
-    plt.legend(loc='upper left')
+    plt.legend()
     plt.savefig(os.path.join(fullpath,output_dir,'weights.pdf'))
 
     # stack the frames with weights.
