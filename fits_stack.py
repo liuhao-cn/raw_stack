@@ -94,10 +94,11 @@ save_aligned_image = False
 # If true, do not report the alignment result
 less_report = True
 
-# Number of ADC digit. The true maximum value should be 2**adc_digit. This should usualLy be 16.
-adc_digit_max = 16
+# Number of ADC digit. The maximum value should be 2**adc_digit-1. This should
+# usualLy be 16, even when the actual digit is e.g., 12 or 14 bits.
+adc_digit_limit = 16
 
-vmax_global = 2**adc_digit_max - 1
+vmax_global = 2**adc_digit_limit - 1
 
 # field rotation ang file
 file_rot_ang = "field_rot_ang.bin"
@@ -110,6 +111,9 @@ final_file_fits = "frame_stacked.fits"
 
 # Working precision takes effect in FFT and matrix multiplication
 working_precision = "float32"
+
+# Working precision takes effect in FFT and matrix multiplication
+working_precision_complex = "complex64"
 
 
 
@@ -175,8 +179,21 @@ def rfft2_freq(n1, n2):
     return f
 
 
-def pre_process(frame):
-    return ndimage.gaussian_filter(frame, sigma=gauss_sigma).astype(working_precision)
+# wrapper of the frame-to-fft process, including:
+#
+# 1. A Tukey window to suppress the edge effect.
+#
+# 2. A pre-process before the matched filtering, including a Gaussian
+#    filtering (smoothing) to suppress the abnormally high CMOS noise peak,
+#    which could corrupt the matched filtering.
+#
+# 3. Explicit control of the precision to save memory.
+#
+def frame2fft(frame):
+    frame1 = (frame*win).astype(working_precision)
+    frame1 = ndimage.gaussian_filter(frame1, sigma=gauss_sigma).astype(working_precision)
+    fft_re = np.fft.rfft2(frame1).astype(working_precision_complex)
+    return fft_re
 
 
 # align a frame to the reference frame
@@ -184,10 +201,10 @@ def align_frames(i):
     tst = time.time()
     # read the raw data as an object, obtain the image and compute its fft
     frame = np.fromfile(file_swp[i], dtype=raw_data_type).reshape(n1, n2)
-    frame_fft = np.fft.rfft2(pre_process(frame*win))
+    frame_fft = frame2fft(frame)
     
     # compute the frame offset
-    cache = np.abs(np.fft.irfft2((ref_fft*frame_fft*mask_hp).astype("complex64")))
+    cache = np.abs(np.fft.irfft2((ref_fft*frame_fft*mask_hp).astype(working_precision_complex)))
     index = np.unravel_index(np.argmax(cache, axis=None), cache.shape)
     s1, s2 = -index[0], -index[1]
     
@@ -446,7 +463,7 @@ win = np.dot(w1.reshape(n1, 1), w2.reshape(1, n2))
 freq = rfft2_freq(n1, n2)
 mask_hp = np.where(freq<highpass_cut, 0, 1)
 
-ref_fft = np.conjugate(np.fft.rfft2(pre_process(ref_frame*win)))
+ref_fft = np.conjugate( frame2fft(ref_frame) )
 ref_fft = ref_fft * mask_hp
 
 # read the frames by main
@@ -510,7 +527,7 @@ if do_fix_ratation==True:
     rot_ang = np.fromfile(file, dtype=working_precision)
     wid = np.argmin(np.abs(rot_ang))
     ref_frame = np.fromfile(file_swp[wid], dtype=raw_data_type).reshape(n1, n2)
-    ref_fft = np.conjugate(np.fft.rfft2(pre_process(ref_frame*win)))
+    ref_fft = np.conjugate( frame2fft(ref_frame) )
     ref_fft = ref_fft * mask_hp
     
 if __name__ == '__main__':    
@@ -530,7 +547,7 @@ if __name__ == '__main__':
     w = compute_weights(frames_working)
     wid = np.argmax(w)
     ref_frame = np.fromfile(file_swp[wid], dtype=raw_data_type).reshape(n1, n2)
-    ref_fft = np.conjugate(np.fft.rfft2(pre_process(ref_frame*win)))
+    ref_fft = np.conjugate( frame2fft(ref_frame) )
     ref_fft = ref_fft * mask_hp
     print("****************************************************")
     print("Frame %i is chosen as the new reference frame. All frames will be re-aligned." %(wid))
@@ -552,13 +569,13 @@ if __name__ == '__main__':
     sy2 = np.where(sy2 < -n2/2, sy2+n2, sy2)
 
     # plot the XY-shifts
-    plt.figure(figsize=(5,4), dpi=200)
+    plt.figure(figsize=(6,4), dpi=200)
     plt.title('XY shifts in pixel')
-    plt.xlabel('Y shifts', fontsize=9)
-    plt.ylabel('X shifts', fontsize=9)
+    plt.xlabel('X shifts', fontsize=9)
+    plt.ylabel('Y shifts', fontsize=9)
     TT = np.float64(np.arange(n_files))/n_files
-    plt.scatter(sx1, sy1, s=50, c=TT, cmap='viridis', alpha=0.8, label='Round 1')
-    plt.scatter(sx2, sy2, s=50, c='k', alpha=0.8, label='Round 2')
+    plt.scatter(sy1, sx1, s=50, c=TT, cmap='viridis', alpha=0.8, label='Round 1')
+    plt.scatter(sy2, sx2, s=50, c='k', alpha=0.8, label='Round 2')
     plt.legend()
     plt.savefig(os.path.join(fullpath,output_dir,'xy-shifts.pdf'))
     
