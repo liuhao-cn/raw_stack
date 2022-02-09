@@ -2,7 +2,7 @@
 # coding: utf-8
 
 ##############################################################
-# Stack the images in fits files.
+# Stack the images in fits or raw files.
 ##############################################################
 
 
