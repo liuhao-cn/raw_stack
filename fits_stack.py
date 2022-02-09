@@ -9,7 +9,7 @@
 ##############################################################
 # Define input parameters
 ##############################################################
-import os, cv2, time, sys, matplotlib
+import os, cv2, time, rawpy, sys, matplotlib
 
 import numpy as np
 import multiprocessing as mp
@@ -57,7 +57,7 @@ extension = "fits"
 nproc_max = int(mp.cpu_count()/2)
 
 # Fraction of frames that will not be used
-bad_fraction = 0.1
+bad_fraction = 0.5
 
 output_dir = "output"
 
@@ -139,6 +139,11 @@ def read_frame_fits(file):
         date_str = hdr[date_tag]
     return frame, date_str, raw_data_type
 
+def read_frame_raw(file):
+    with rawpy.imread(file) as raw:
+        raw_data_type = raw.raw_image.dtype
+        frame = raw.raw_image.copy()
+    return frame, None, raw_data_type
 
 # make HDU with property cards
 def data2hdu(data, cards=None, primary=False):
@@ -423,6 +428,13 @@ else:
     # Improve the display effect of Jupyter notebook
     from IPython.core.display import display, HTML
 
+# determine the working mode, only fits allows fix-rotation
+if extension=="fits" or extension=='fit':
+    mode = "fits"
+else:
+    mode = "raw"
+    do_fix_ratation = False
+
 # make a list of working files and determine the number of processes to be used
 os.chdir(working_dir)
 fullpath = os.path.abspath("./")    
@@ -450,7 +462,14 @@ for file in file_lst:
     file_swp.append(os.path.splitext(file)[0] + '.swp')
 
 # use the first file as the initial reference file
-ref_frame, _, raw_data_type = read_frame_fits(file_lst[0]) 
+if mode=="fits":
+    ref_frame, _, raw_data_type = read_frame_fits(file_lst[0]) 
+elif mode=="raw":
+    ref_frame, _, raw_data_type = read_frame_raw(file_lst[0]) 
+else:
+    print("Error! Unknown working mode %s, please check extension!" %(mode))
+
+
 n1 = np.int64(np.shape(ref_frame)[0])
 n2 = np.int64(np.shape(ref_frame)[1])
 
@@ -476,7 +495,10 @@ if __name__ == '__main__':
     tst = time.time()
     datetime = []
     for i in range(n_files):
-        frame1, time1, _ = read_frame_fits(file_lst[i])
+        if mode=="fits":
+            frame1, time1, _ = read_frame_fits(file_lst[i])
+        elif mode=="raw":
+            frame1, time1, _ = read_frame_raw(file_lst[i])
         frame1.tofile(file_swp[i])
         datetime.append(time1)
         frames_working[i,:,:] = frame1
