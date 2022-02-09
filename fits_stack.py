@@ -48,8 +48,11 @@ console = True
 working_dir = "./fits"
 
 # Define the input file extension. All files in the working directory with
-# this extension will be used. Will be overwritten by the command-line
-# parameter.
+# this extension will be used. If this is fits or fit, work in fits mode
+# (usually for an astro-camera), otherwise work in raw mode (usually for a
+# DSLR)
+#
+# Note: Will be overwritten by the command-line parameter.
 extension = "fits"
 
 # Define the maximum number of processes to be used. Will be overwritten by
