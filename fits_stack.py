@@ -43,6 +43,9 @@ target = SkyCoord(ra=83.82208333*u.deg, dec=-5.39111111*u.deg)
 # and will not produce online images.
 console = True
 
+# color type of the camera, "color" for color camera, and "mono" for mono-camera
+color_type = "mono"
+
 # Working directory, all raw or fits files should be in this directory. Will
 # be overwritten by the command-line parameter.
 working_dir = "./fits"
@@ -60,7 +63,7 @@ extension = "fits"
 nproc_max = int(mp.cpu_count()/2)
 
 # Fraction of frames that will not be used
-bad_fraction = 0.5
+bad_fraction = 0.2
 
 output_dir = "output"
 
@@ -118,13 +121,17 @@ working_precision = "float32"
 # Working precision takes effect in FFT and matrix multiplication
 working_precision_complex = "complex64"
 
+# check the color type
+if color_type!="color" and color_type!="mono":
+    print("Error! The color type has to be color or mono!")
+    sys.exit()
 
-
-
-
-
-
-
+# determine the working mode, only fits allows fix-rotation
+if extension=="fits" or extension=='fit':
+    mode = "fits"
+else:
+    mode = "raw"
+    do_fix_ratation = False
 
 
 
@@ -198,37 +205,85 @@ def rfft2_freq(n1, n2):
 # 3. Explicit control of the precision to save memory.
 #
 def frame2fft(frame):
-    frame1 = (frame*win).astype(working_precision)
-    frame1 = ndimage.gaussian_filter(frame1, sigma=gauss_sigma).astype(working_precision)
-    fft_re = np.fft.rfft2(frame1).astype(working_precision_complex)
-    return fft_re
+    # reshape to separate the Bayer components
+    frame = frame.reshape(n1s, 2, n2s, 2)
+
+    frame_fft = np.zeros([fs1, 2, fs2, 2], dtype=working_precision_complex)
+    for jj in range(2):
+        for kk in range(2):
+            frame1 = (frame[:,jj,:,kk]*win).astype(working_precision).reshape(n1s, n2s)
+            frame1 = ndimage.gaussian_filter(frame1, sigma=gauss_sigma).astype(working_precision)
+            frame_fft[:,jj,:,kk] = np.fft.rfft2(frame1)
+
+    # restore the shape
+    frame = frame.reshape(n1, n2)
+    return frame_fft
 
 
-# align a frame to the reference frame
+# align a frame to the reference frame, do it for the four Bayer components
+# separately so the color dispersion will be corrected at the same time.
 def align_frames(i):
     tst = time.time()
-    # read the raw data as an object, obtain the image and compute its fft
-    frame = np.fromfile(file_swp[i], dtype=raw_data_type).reshape(n1, n2)
+
+    frame = np.fromfile(file_swp[i], dtype=raw_data_type).reshape(n1s, 2, n2s, 2)
     frame_fft = frame2fft(frame)
-    
-    # compute the frame offset
-    cache = np.abs(np.fft.irfft2((ref_fft*frame_fft*mask_hp).astype(working_precision_complex)))
-    index = np.unravel_index(np.argmax(cache, axis=None), cache.shape)
-    s1, s2 = -index[0], -index[1]
-    
-    # make sure that the Bayer matrix will not be corrupted
-    s1 = s1 - np.mod(s1, 2)
-    s2 = s2 - np.mod(s2, 2)
-    
-    # fix the offset and save into the result array
-    frame = np.roll(frame, (s1, s2), axis=(0,1))
-    
-    # save the aligned images and binaries if necessary
+
+    s1 = np.zeros([2,2], dtype="int16")
+    s2 = np.zeros([2,2], dtype="int16")
+    # compute the frame offset for each Bayer component and save the offsets
+    for jj in range(2):
+        for kk in range(2):
+            fft_comb = (ref_fft[:,jj,:,kk]*frame_fft[:,jj,:,kk]).reshape(fs1,fs2).astype(working_precision_complex)
+            buff_local = np.abs( np.fft.irfft2((fft_comb*mask_hp).astype(working_precision_complex)) )
+            index = np.unravel_index(np.argmax(buff_local, axis=None), buff_local.shape)
+            s1[jj,kk], s2[jj,kk] = -index[0], -index[1]
+
+    # For a color camera, the four Bayer components are aligned separately to
+    # fix the color dispersion. However, for a mono-camera, the alignment is
+    # done for the entire frame with the average offsets.
+    if color_type=="color":
+        for jj in range(2):
+            for kk in range(2):
+                # fix the offset for one Bayer component and save into the result array
+                frame[:,jj,:,kk] = np.roll( frame[:,jj,:,kk].reshape(n1s, n2s), 
+                    (s1[jj,kk], s2[jj,kk]), axis=(0,1) )
+    else:
+        s1 = int( np.round(np.mean(s1)*2.) )
+        s2 = int( np.round(np.mean(s2)*2.) )
+        frame = np.roll( frame.reshape(n1, n2), (s1, s2), axis=(0,1))
+
+    # save the aligned binaries
+    frame = frame.reshape(n1, n2)
     frame.tofile(file_swp[i])
     
     if less_report==False:
         print("\nFrame %6i (%s) aligned in %8.2f sec, (sx, sy) = (%8i,%8i)." %(i, file_lst[i], time.time()-tst, s1, s2))
-    return i, s1, s2
+    
+    if color_type=="color":
+        return i, s1.flatten(), s2.flatten()
+    else:
+        return i, s1, s2
+
+
+# parse the offsets from the starmap() output list
+def parse_offsets(out_list):
+    sx, sy = [], []
+    for i in range(n_files):
+        sx.append(out_list[i][1])
+        sy.append(out_list[i][2])
+    sx = np.array(sx)
+    sy = np.array(sy)
+    if color_type=="color":
+        sx = np.where(sx >  n1s/2, sx-n1s, sx)
+        sx = np.where(sx < -n1s/2, sx+n1s, sx)
+        sy = np.where(sy >  n2s/2, sy-n2s, sy)
+        sy = np.where(sy < -n2s/2, sy+n2s, sy)
+    else:
+        sx = np.where(sx >  n1/2, sx-n1, sx)
+        sx = np.where(sx < -n1/2, sx+n1, sx)
+        sy = np.where(sy >  n2/2, sy-n2, sy)
+        sy = np.where(sy < -n2/2, sy+n2, sy)
+    return sx, sy
 
 
 def compute_weights(frames_working):
@@ -309,48 +364,47 @@ def unit_vec(vec):
     return vec_nml
 
 
-# Convert round angle to equivalent linear angles. The idea is: when the
-# difference between two neighbors is bigger than a threshold, all following
-# angles are corrected by n*360 degree to minimize the difference.
+# Convert a round angle series to an equivalent linear angle series. The idea
+# is: when the difference between two neighbors is bigger than a threshold,
+# all following angles are corrected by 360N degree to minimize the
+# difference.
 def round2linear(ang_in, deg=True, threshold=350):
     n = np.size(ang_in)
     ang = ang_in.copy()
-    fac = 180/np.pi
-    if deg==False:
-        ang = ang*fac
+    d2r = np.pi/180
+    if deg==True:
+        ang = ang*d2r
+
     for i in range(n-1):
-        dif = ang[i]-ang[i+1]
-        if np.abs(dif)>threshold:
-            da = ang[i+1] - ang[i]
-            cc = np.cos(da/fac)
-            ss = np.sin(da/fac)
-            da1 = np.arctan2(ss, cc)*fac
-            ang[i+1:n] = ang[i+1:n] + da1 - da
-    return ang
+        dif = ang[i+1] - ang[i]
+        if np.abs(dif)>threshold*d2r:
+            dif1 = np.arctan2( np.sin(dif), np.cos(dif) )
+            ang[i+1:n] = ang[i+1:n] + dif1 - dif
+    return ang/d2r
 
 
 # compute the field rotation, return continuous angle, but can also return
 # arccos values by debug=True (discontinuous, only for debug)
 def compute_field_rot(target, hor_ref_frame, debug=False):
     north_pole = SkyCoord(ra=0*u.deg, dec=90*u.deg)
-    north_pole_coord_hor = north_pole.transform_to(hor_ref_frame)
+    north_pole_hor = north_pole.transform_to(hor_ref_frame)
     target_coord_hor = target.transform_to(hor_ref_frame)
     # convert el-az to unit vectors
     el_target = target_coord_hor.alt.to_value()
     az_target = target_coord_hor.az.to_value()
-    el_np = north_pole_coord_hor.alt.to_value()
-    az_np = north_pole_coord_hor.az.to_value()
-    vec_target = elaz2vec(el_target, az_target)
-    vec_north  = elaz2vec(el_np, az_np)
-    vec_z      = vec_north*0; vec_z[:,2] = 1
+    el_np = north_pole_hor.alt.to_value()
+    az_np = north_pole_hor.az.to_value()
+    vec_target_hor      = elaz2vec(el_target, az_target)
+    vec_north_pole_hor  = elaz2vec(el_np, az_np)
+    vec_zenith          = vec_north_pole_hor*0; vec_zenith[:,2] = 1
     # compute local east by cross product, with normalization
-    east_cel = unit_vec(np.cross(vec_target, vec_north))
-    east_hor = unit_vec(np.cross(vec_target, vec_z    ))
+    east_cel = unit_vec(np.cross(vec_target_hor, vec_north_pole_hor))
+    east_hor = unit_vec(np.cross(vec_target_hor, vec_zenith        ))
     # determine the hor-to-cel rotation direction (sign of rotation)
     vec_cel2hor = np.cross(east_cel, east_hor)
-    flag = np.sum(vec_cel2hor*vec_target, axis=1)
+    flag = np.sum(vec_cel2hor*vec_target_hor, axis=1)
     flag = np.where(flag>0, 1, -1)
-    # compute field rotation angle by atan2
+    # compute field rotation angle by arctan2
     val_cos = np.sum(east_cel*east_hor, axis=1)
     val_sin = len_vec(vec_cel2hor)
     rot_ang = np.arctan2(val_sin, val_cos)*180/np.pi
@@ -364,11 +418,11 @@ def compute_field_rot(target, hor_ref_frame, debug=False):
 # note: need to check if we should multiply -1 to angle. 
 # note: the four Bayer blocks are rotated separately so as not to corrupt the Bayer matrix.
 def fix_rotation(file, angle, raw_data_type, n1, n2):
-    frame = np.fromfile(file, dtype=raw_data_type).reshape(int(n1/2), 2, int(n2/2), 2)
-    frame00 = frame[:,0,:,0].reshape(int(n1/2), int(n2/2))
-    frame01 = frame[:,0,:,1].reshape(int(n1/2), int(n2/2))
-    frame10 = frame[:,1,:,0].reshape(int(n1/2), int(n2/2))
-    frame11 = frame[:,1,:,1].reshape(int(n1/2), int(n2/2))
+    frame = np.fromfile(file, dtype=raw_data_type).reshape(n1s, 2, n2s, 2)
+    frame00 = frame[:,0,:,0].reshape(n1s, n2s)
+    frame01 = frame[:,0,:,1].reshape(n1s, n2s)
+    frame10 = frame[:,1,:,0].reshape(n1s, n2s)
+    frame11 = frame[:,1,:,1].reshape(n1s, n2s)
     frame00 = ndimage.rotate(frame00, angle, reshape=False)
     frame01 = ndimage.rotate(frame01, angle, reshape=False)
     frame10 = ndimage.rotate(frame10, angle, reshape=False)
@@ -390,7 +444,7 @@ def normalize_frame(frame, vmin, vmax):
     frame_norm = frame.copy()
     shape = np.shape(frame_norm)
     n1, n2 = shape[0], shape[1]
-    frame_norm = frame_norm.reshape(int(n1/2), 2, int(n2/2), 2)
+    frame_norm = frame_norm.reshape(n1s, 2, n2s, 2)
     frame_norm[:,0,:,0] = rescale_array(frame_norm[:,0,:,0], vmin, vmax)
     frame_norm[:,0,:,1] = rescale_array(frame_norm[:,0,:,1], vmin, vmax)
     frame_norm[:,1,:,0] = rescale_array(frame_norm[:,1,:,0], vmin, vmax)
@@ -431,12 +485,6 @@ else:
     # Improve the display effect of Jupyter notebook
     from IPython.core.display import display, HTML
 
-# determine the working mode, only fits allows fix-rotation
-if extension=="fits" or extension=='fit':
-    mode = "fits"
-else:
-    mode = "raw"
-    do_fix_ratation = False
 
 # make a list of working files and determine the number of processes to be used
 os.chdir(working_dir)
@@ -475,18 +523,20 @@ else:
 
 n1 = np.int64(np.shape(ref_frame)[0])
 n2 = np.int64(np.shape(ref_frame)[1])
+n1s = int(n1/2)
+n2s = int(n2/2)
 
 # make the 2D-tukey window
-w1 = tukey(n1, alpha=tukey_alpha)
-w2 = tukey(n2, alpha=tukey_alpha)
-win = np.dot(w1.reshape(n1, 1), w2.reshape(1, n2))
+w1 = tukey(n1s, alpha=tukey_alpha)
+w2 = tukey(n2s, alpha=tukey_alpha)
+win = np.dot(w1.reshape(n1s, 1), w2.reshape(1, n2s))
 
 # make a low-pass window in the Fourier domain
-freq = rfft2_freq(n1, n2)
+freq = rfft2_freq(n1s, n2s)
+fs1, fs2 = (freq.shape)[0], (freq.shape)[1]
 mask_hp = np.where(freq<highpass_cut, 0, 1)
 
 ref_fft = np.conjugate( frame2fft(ref_frame) )
-ref_fft = ref_fft * mask_hp
 
 # read the frames by main
 if __name__ == '__main__':
@@ -553,27 +603,22 @@ if do_fix_ratation==True:
     wid = np.argmin(np.abs(rot_ang))
     ref_frame = np.fromfile(file_swp[wid], dtype=raw_data_type).reshape(n1, n2)
     ref_fft = np.conjugate( frame2fft(ref_frame) )
-    ref_fft = ref_fft * mask_hp
     
-if __name__ == '__main__':    
+if __name__ == '__main__':
+    # The first round alignment
     tst = time.time()
     with mp.Pool(nproc) as pool:
-        output = [pool.map(align_frames, range(n_files))]
+        output = pool.map(align_frames, range(n_files))
     print("Initial alignment done, time cost:                        %9.2f" %(time.time()-tst))
 
-    output_arr = np.array(output)
-    sx1, sy1 = output_arr[0,:,1], output_arr[0,:,2]
-    sx1 = np.where(sx1 >  n1/2, sx1-n1, sx1)
-    sx1 = np.where(sx1 < -n1/2, sx1+n1, sx1)
-    sy1 = np.where(sy1 >  n2/2, sy1-n2, sy1)
-    sy1 = np.where(sy1 < -n2/2, sy1+n2, sy1)
+    # parse the output and save the offsets
+    sx1, sy1 = parse_offsets(output)
 
     # identify the frame of maximum weight, and use it as the new reference frame.
     w = compute_weights(frames_working)
     wid = np.argmax(w)
     ref_frame = np.fromfile(file_swp[wid], dtype=raw_data_type).reshape(n1, n2)
     ref_fft = np.conjugate( frame2fft(ref_frame) )
-    ref_fft = ref_fft * mask_hp
     print("****************************************************")
     print("Frame %i is chosen as the new reference frame. All frames will be re-aligned." %(wid))
     print("The new reference file is: %s" %(file_lst[wid]))
@@ -582,27 +627,42 @@ if __name__ == '__main__':
     # work with multiprocessing to align the frames again, and remove the swp files
     tst = time.time()
     with mp.Pool(nproc) as pool:
-        output = [pool.map(align_frames, range(n_files))]
+        output = pool.map(align_frames, range(n_files))
     print("Final alignment done, time cost:                          %9.2f" %(time.time()-tst))
     
-    # parse and record the offsets
-    output_arr = np.array(output)
-    sx2, sy2 = output_arr[0,:,1], output_arr[0,:,2]
-    sx2 = np.where(sx2 >  n1/2, sx2-n1, sx2)
-    sx2 = np.where(sx2 < -n1/2, sx2+n1, sx2)
-    sy2 = np.where(sy2 >  n2/2, sy2-n2, sy2)
-    sy2 = np.where(sy2 < -n2/2, sy2+n2, sy2)
+    # parse the output and save the offsets
+    sx2, sy2 = parse_offsets(output)
 
     # plot the XY-shifts
-    plt.figure(figsize=(6,4), dpi=200)
-    plt.title('XY shifts in pixel')
-    plt.xlabel('X shifts', fontsize=9)
-    plt.ylabel('Y shifts', fontsize=9)
-    TT = np.float64(np.arange(n_files))/n_files
-    plt.scatter(sy1, sx1, s=50, c=TT, cmap='viridis', alpha=0.8, label='Round 1')
-    plt.scatter(sy2, sx2, s=50, c='k', alpha=0.8, label='Round 2')
-    plt.legend()
-    plt.savefig(os.path.join(fullpath,output_dir,'xy-shifts.pdf'))
+    if color_type=="color":
+        plt.figure(figsize=(6,4), dpi=200)
+        plt.title('XY shifts in pixel')
+        plt.xlabel('X shifts', fontsize=9)
+        plt.ylabel('Y shifts', fontsize=9)
+        
+        plt.scatter(sy1[:,0].flatten(), sx1[:,0].flatten(), s=20, c='r', alpha=0.5, label='Round 1, Bayer-00')
+        plt.scatter(sy1[:,0].flatten(), sx1[:,1].flatten(), s=20, c='g', alpha=0.5, label='Round 1, Bayer-01')
+        plt.scatter(sy1[:,1].flatten(), sx1[:,0].flatten(), s=20, c='g', alpha=0.5, label='Round 1, Bayer-10')
+        plt.scatter(sy1[:,1].flatten(), sx1[:,1].flatten(), s=20, c='b', alpha=0.5, label='Round 1, Bayer-11')
+        
+        plt.scatter(sy2[:,0].flatten(), sx2[:,0].flatten(), s=50, c='r', alpha=0.5, label='Round 2, Bayer-00')
+        plt.scatter(sy2[:,0].flatten(), sx2[:,1].flatten(), s=50, c='g', alpha=0.5, label='Round 2, Bayer-01')
+        plt.scatter(sy2[:,1].flatten(), sx2[:,0].flatten(), s=50, c='g', alpha=0.5, label='Round 2, Bayer-10')
+        plt.scatter(sy2[:,1].flatten(), sx2[:,1].flatten(), s=50, c='b', alpha=0.5, label='Round 2, Bayer-11')
+        
+        plt.legend()
+        plt.savefig(os.path.join(fullpath,output_dir,'xy-shifts.pdf'))
+    else:
+        # plot the XY-shifts
+        plt.figure(figsize=(6,4), dpi=200)
+        plt.title('XY shifts in pixel')
+        plt.xlabel('X shifts', fontsize=9)
+        plt.ylabel('Y shifts', fontsize=9)
+        TT = np.float64(np.arange(n_files))/n_files
+        plt.scatter(sy1, sx1, s=50, c=TT, cmap='viridis', alpha=0.8, label='Round 1')
+        plt.scatter(sy2, sx2, s=50, c='k', alpha=0.8, label='Round 2')
+        plt.legend()
+        plt.savefig(os.path.join(fullpath,output_dir,'xy-shifts.pdf'))
     
     # recompute the weights
     tst = time.time()
@@ -645,6 +705,21 @@ if __name__ == '__main__':
         os.remove(file)
 
     print("Done!")
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
