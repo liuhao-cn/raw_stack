@@ -17,6 +17,7 @@ import matplotlib.pyplot as plt
 import heapq as hp
 
 from scipy import ndimage
+from scipy import fft
 from scipy.signal.windows import tukey
 from datetime import datetime
 from astropy.io import fits
@@ -44,7 +45,7 @@ target = SkyCoord(ra=83.82208333*u.deg, dec=-5.39111111*u.deg)
 console = True
 
 # color type of the camera, "color" for color camera, and "mono" for mono-camera
-color_type = "mono"
+color_type = "color"
 
 # Working directory, all raw or fits files should be in this directory. Will
 # be overwritten by the command-line parameter.
@@ -188,8 +189,8 @@ def write_fits_simple(list_of_data, file, overwrite=True):
 # compute 2d real FFT frequencies as a fraction of the Nyquist frequency
 def rfft2_freq(n1, n2):
     n2r = n2//2 + 1
-    f1 = np.repeat(np.fft.fftfreq(n1), n2r).reshape(n1,n2r)
-    f2 = np.repeat(np.fft.rfftfreq(n2),n1).reshape(n2r,n1).transpose()
+    f1 = np.repeat(fft.fftfreq(n1), n2r).reshape(n1,n2r)
+    f2 = np.repeat(fft.rfftfreq(n2),n1).reshape(n2r,n1).transpose()
     f = np.sqrt(f1**2 + f2**2)
     return f
 
@@ -213,7 +214,7 @@ def frame2fft(frame):
         for kk in range(2):
             frame1 = (frame[:,jj,:,kk]*win).astype(working_precision).reshape(n1s, n2s)
             frame1 = ndimage.gaussian_filter(frame1, sigma=gauss_sigma).astype(working_precision)
-            frame_fft[:,jj,:,kk] = np.fft.rfft2(frame1)
+            frame_fft[:,jj,:,kk] = fft.rfft2(frame1)
 
     # restore the shape
     frame = frame.reshape(n1, n2)
@@ -234,23 +235,25 @@ def align_frames(i):
     for jj in range(2):
         for kk in range(2):
             fft_comb = (ref_fft[:,jj,:,kk]*frame_fft[:,jj,:,kk]).reshape(fs1,fs2).astype(working_precision_complex)
-            buff_local = np.abs( np.fft.irfft2((fft_comb*mask_hp).astype(working_precision_complex)) )
+            buff_local = np.abs( fft.irfft2((fft_comb*mask_hp).astype(working_precision_complex)) )
             index = np.unravel_index(np.argmax(buff_local, axis=None), buff_local.shape)
             s1[jj,kk], s2[jj,kk] = -index[0], -index[1]
+
+    s1 = norm_offset(s1, n1s)
+    s2 = norm_offset(s2, n2s)
 
     # For a color camera, the four Bayer components are aligned separately to
     # fix the color dispersion. However, for a mono-camera, the alignment is
     # done for the entire frame with the average offsets.
-    if color_type=="color":
-        for jj in range(2):
-            for kk in range(2):
-                # fix the offset for one Bayer component and save into the result array
-                frame[:,jj,:,kk] = np.roll( frame[:,jj,:,kk].reshape(n1s, n2s), 
-                    (s1[jj,kk], s2[jj,kk]), axis=(0,1) )
-    else:
-        s1 = int( np.round(np.mean(s1)*2.) )
-        s2 = int( np.round(np.mean(s2)*2.) )
-        frame = np.roll( frame.reshape(n1, n2), (s1, s2), axis=(0,1))
+    if color_type!="color":
+        s1[:,:] = int( np.round(np.mean(s1)) )
+        s2[:,:] = int( np.round(np.mean(s2)) )
+
+    for jj in range(2):
+        for kk in range(2):
+            # fix the offset for one Bayer component and save into the result array
+            frame[:,jj,:,kk] = np.roll( frame[:,jj,:,kk].reshape(n1s, n2s), 
+                (s1[jj,kk], s2[jj,kk]), axis=(0,1) )
 
     # save the aligned binaries
     frame = frame.reshape(n1, n2)
@@ -259,10 +262,14 @@ def align_frames(i):
     if less_report==False:
         print("\nFrame %6i (%s) aligned in %8.2f sec, (sx, sy) = (%8i,%8i)." %(i, file_lst[i], time.time()-tst, s1, s2))
     
-    if color_type=="color":
-        return i, s1.flatten(), s2.flatten()
-    else:
-        return i, s1, s2
+    return i, s1.flatten(), s2.flatten()
+
+
+def norm_offset(offset_arr, offset_max):
+    buff = offset_arr.flatten()
+    buff = np.where(buff >  offset_max/2, buff-offset_max, buff)
+    buff = np.where(buff < -offset_max/2, buff+offset_max, buff)
+    return buff.reshape(offset_arr.shape)
 
 
 # parse the offsets from the starmap() output list
@@ -271,18 +278,8 @@ def parse_offsets(out_list):
     for i in range(n_files):
         sx.append(out_list[i][1])
         sy.append(out_list[i][2])
-    sx = np.array(sx)
-    sy = np.array(sy)
-    if color_type=="color":
-        sx = np.where(sx >  n1s/2, sx-n1s, sx)
-        sx = np.where(sx < -n1s/2, sx+n1s, sx)
-        sy = np.where(sy >  n2s/2, sy-n2s, sy)
-        sy = np.where(sy < -n2s/2, sy+n2s, sy)
-    else:
-        sx = np.where(sx >  n1/2, sx-n1, sx)
-        sx = np.where(sx < -n1/2, sx+n1, sx)
-        sy = np.where(sy >  n2/2, sy-n2, sy)
-        sy = np.where(sy < -n2/2, sy+n2, sy)
+    sx = norm_offset( np.array(sx), n1s )
+    sy = norm_offset( np.array(sy), n2s )
     return sx, sy
 
 
@@ -629,40 +626,33 @@ if __name__ == '__main__':
     with mp.Pool(nproc) as pool:
         output = pool.map(align_frames, range(n_files))
     print("Final alignment done, time cost:                          %9.2f" %(time.time()-tst))
-    
+
     # parse the output and save the offsets
     sx2, sy2 = parse_offsets(output)
 
     # plot the XY-shifts
+    plt.figure(figsize=(6,4), dpi=200)
+    plt.title('XY shifts in pixel')
+    plt.xlabel('X shifts', fontsize=9)
+    plt.ylabel('Y shifts', fontsize=9)
+    
     if color_type=="color":
-        plt.figure(figsize=(6,4), dpi=200)
-        plt.title('XY shifts in pixel')
-        plt.xlabel('X shifts', fontsize=9)
-        plt.ylabel('Y shifts', fontsize=9)
-        
-        plt.scatter(sy1[:,0].flatten(), sx1[:,0].flatten(), s=20, c='r', alpha=0.5, label='Round 1, Bayer-00')
-        plt.scatter(sy1[:,0].flatten(), sx1[:,1].flatten(), s=20, c='g', alpha=0.5, label='Round 1, Bayer-01')
-        plt.scatter(sy1[:,1].flatten(), sx1[:,0].flatten(), s=20, c='g', alpha=0.5, label='Round 1, Bayer-10')
-        plt.scatter(sy1[:,1].flatten(), sx1[:,1].flatten(), s=20, c='b', alpha=0.5, label='Round 1, Bayer-11')
+        plt.scatter(sy1[:,0].flatten(), sx1[:,0].flatten(), s=50, c='r', alpha=0.5, label='Round 1, Bayer-00')
+        plt.scatter(sy1[:,1].flatten(), sx1[:,1].flatten(), s=30, c='g', alpha=0.5, label='Round 1, Bayer-01')
+        plt.scatter(sy1[:,2].flatten(), sx1[:,2].flatten(), s=30, c='g', alpha=0.5, label='Round 1, Bayer-10')
+        plt.scatter(sy1[:,3].flatten(), sx1[:,3].flatten(), s=10, c='b', alpha=0.5, label='Round 1, Bayer-11')
         
         plt.scatter(sy2[:,0].flatten(), sx2[:,0].flatten(), s=50, c='r', alpha=0.5, label='Round 2, Bayer-00')
-        plt.scatter(sy2[:,0].flatten(), sx2[:,1].flatten(), s=50, c='g', alpha=0.5, label='Round 2, Bayer-01')
-        plt.scatter(sy2[:,1].flatten(), sx2[:,0].flatten(), s=50, c='g', alpha=0.5, label='Round 2, Bayer-10')
-        plt.scatter(sy2[:,1].flatten(), sx2[:,1].flatten(), s=50, c='b', alpha=0.5, label='Round 2, Bayer-11')
-        
-        plt.legend()
-        plt.savefig(os.path.join(fullpath,output_dir,'xy-shifts.pdf'))
+        plt.scatter(sy2[:,1].flatten(), sx2[:,1].flatten(), s=50, c='g', alpha=0.5, label='Round 2, Bayer-01')
+        plt.scatter(sy2[:,2].flatten(), sx2[:,2].flatten(), s=50, c='g', alpha=0.5, label='Round 2, Bayer-10')
+        plt.scatter(sy2[:,3].flatten(), sx2[:,3].flatten(), s=50, c='b', alpha=0.5, label='Round 2, Bayer-11')
     else:
-        # plot the XY-shifts
-        plt.figure(figsize=(6,4), dpi=200)
-        plt.title('XY shifts in pixel')
-        plt.xlabel('X shifts', fontsize=9)
-        plt.ylabel('Y shifts', fontsize=9)
-        TT = np.float64(np.arange(n_files))/n_files
-        plt.scatter(sy1, sx1, s=50, c=TT, cmap='viridis', alpha=0.8, label='Round 1')
-        plt.scatter(sy2, sx2, s=50, c='k', alpha=0.8, label='Round 2')
-        plt.legend()
-        plt.savefig(os.path.join(fullpath,output_dir,'xy-shifts.pdf'))
+        TT = np.arange(n_files)
+        plt.scatter(sy1[:,0].flatten(), sx1[:,0].flatten(), s=20, c=TT, alpha=0.5, label='Round 1')
+        plt.scatter(sy2[:,0].flatten(), sx2[:,0].flatten(), s=50, c=TT, alpha=0.5, label='Round 2')
+
+    plt.legend()
+    plt.savefig(os.path.join(fullpath,output_dir,'xy-shifts.pdf'))
     
     # recompute the weights
     tst = time.time()
