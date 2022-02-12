@@ -229,8 +229,8 @@ def align_frames(i):
     frame = np.fromfile(file_swp[i], dtype=raw_data_type).reshape(n1s, 2, n2s, 2)
     frame_fft = frame2fft(frame)
 
-    s1 = np.zeros([2,2], dtype="int16")
-    s2 = np.zeros([2,2], dtype="int16")
+    s1 = np.zeros([2,2], dtype=np.int32)
+    s2 = np.zeros([2,2], dtype=np.int32)
     # compute the frame offset for each Bayer component and save the offsets
     for jj in range(2):
         for kk in range(2):
@@ -239,15 +239,15 @@ def align_frames(i):
             index = np.unravel_index(np.argmax(buff_local, axis=None), buff_local.shape)
             s1[jj,kk], s2[jj,kk] = -index[0], -index[1]
 
-    s1 = norm_offset(s1, n1s)
-    s2 = norm_offset(s2, n2s)
+    s1 = periodical_norm(s1, n1s).astype(np.int32)
+    s2 = periodical_norm(s2, n2s).astype(np.int32)
 
     # For a color camera, the four Bayer components are aligned separately to
     # fix the color dispersion. However, for a mono-camera, the alignment is
-    # done for the entire frame with the average offsets.
+    # done with the average offsets (computed with circular statistics).
     if color_type!="color":
-        s1[:,:] = int( np.round(np.mean(s1)) )
-        s2[:,:] = int( np.round(np.mean(s2)) )
+        s1[:,:] = periodical_mean(s1, n1s).astype(np.int32)
+        s2[:,:] = periodical_mean(s2, n2s).astype(np.int32)
 
     for jj in range(2):
         for kk in range(2):
@@ -265,11 +265,24 @@ def align_frames(i):
     return i, s1.flatten(), s2.flatten()
 
 
-def norm_offset(offset_arr, offset_max):
-    buff = offset_arr.flatten()
-    buff = np.where(buff >  offset_max/2, buff-offset_max, buff)
-    buff = np.where(buff < -offset_max/2, buff+offset_max, buff)
-    return buff.reshape(offset_arr.shape)
+# normalize periodical data to -period/2~period/2 with circular statistics
+def periodical_norm(x, period):
+    ang_rad = x/period*2*np.pi
+    cx = np.cos(ang_rad)
+    sx = np.sin(ang_rad)
+    ang_rad = np.arctan2(sx, cx)
+    x1 = ang_rad/2/np.pi*period
+    return x1
+
+
+# compute the mean of periodical data
+def periodical_mean(x, period):
+    ang_rad = x/period*2*np.pi
+    cx = np.mean( np.cos(ang_rad) )
+    sx = np.mean( np.sin(ang_rad) )
+    ang_mean = np.arctan2(sx, cx)
+    x_mean = ang_mean/2/np.pi*period
+    return x_mean
 
 
 # parse the offsets from the starmap() output list
@@ -278,8 +291,8 @@ def parse_offsets(out_list):
     for i in range(n_files):
         sx.append(out_list[i][1])
         sy.append(out_list[i][2])
-    sx = norm_offset( np.array(sx), n1s )
-    sy = norm_offset( np.array(sy), n2s )
+    sx = periodical_norm( np.array(sx), n1s )
+    sy = periodical_norm( np.array(sy), n2s )
     return sx, sy
 
 
@@ -642,10 +655,10 @@ if __name__ == '__main__':
         plt.scatter(sy1[:,2].flatten(), sx1[:,2].flatten(), s=30, c='g', alpha=0.5, label='Round 1, Bayer-10')
         plt.scatter(sy1[:,3].flatten(), sx1[:,3].flatten(), s=10, c='b', alpha=0.5, label='Round 1, Bayer-11')
         
-        plt.scatter(sy2[:,0].flatten(), sx2[:,0].flatten(), s=50, c='r', alpha=0.5, label='Round 2, Bayer-00')
-        plt.scatter(sy2[:,1].flatten(), sx2[:,1].flatten(), s=50, c='g', alpha=0.5, label='Round 2, Bayer-01')
-        plt.scatter(sy2[:,2].flatten(), sx2[:,2].flatten(), s=50, c='g', alpha=0.5, label='Round 2, Bayer-10')
-        plt.scatter(sy2[:,3].flatten(), sx2[:,3].flatten(), s=50, c='b', alpha=0.5, label='Round 2, Bayer-11')
+        plt.scatter(sy2[:,0].flatten(), sx2[:,0].flatten(), s=50, c='k', alpha=0.5, label='Round 2, Bayer-00')
+        plt.scatter(sy2[:,1].flatten(), sx2[:,1].flatten(), s=50, c='k', alpha=0.5, label='Round 2, Bayer-01')
+        plt.scatter(sy2[:,2].flatten(), sx2[:,2].flatten(), s=50, c='k', alpha=0.5, label='Round 2, Bayer-10')
+        plt.scatter(sy2[:,3].flatten(), sx2[:,3].flatten(), s=50, c='k', alpha=0.5, label='Round 2, Bayer-11')
     else:
         TT = np.arange(n_files)
         plt.scatter(sy1[:,0].flatten(), sx1[:,0].flatten(), s=20, c=TT, alpha=0.5, label='Round 1')
