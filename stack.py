@@ -528,6 +528,7 @@ if console == True:
 else:
     # Improve the display effect of Jupyter notebook
     from IPython.core.display import display, HTML
+    display(HTML("<style>.container { width:95% !important; }</style>"))
 
 # check the color type
 if align_color_mode!="color" and align_color_mode!="mono":
