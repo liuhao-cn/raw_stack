@@ -7,7 +7,7 @@
 
 
 ##############################################################
-# Define input parameters
+# Imports
 ##############################################################
 import os, cv2, time, rawpy, sys, matplotlib
 
@@ -26,13 +26,17 @@ from astropy.time import Time as astro_time
 from astropy.time import TimezoneInfo
 import astropy.units as u
 
-# longitude, latitude, height and time zone of the AHU observatory
-# and define the location object of the AHU observatory
+
+##############################################################
+# Site and observation targets
+##############################################################
+# longitude, latitude, height and time zone of the AHU observatory to define
+# the location object of the AHU observatory
 ahu_lon = 117.21  # needs to be updated
 ahu_lat = 31.84   # needs to be updated
 ahu_alt = 63.00   # needs to be updated
 ahu_zone = +8
-ahu_observatory = EarthLocation(lon=ahu_lon*u.deg, lat=ahu_lat*u.deg, height=ahu_alt*u.m)
+ahu_site = EarthLocation(lon=ahu_lon*u.deg, lat=ahu_lat*u.deg, height=ahu_alt*u.m)
 
 # Define observation target, either in name or in ra-dec.
 # in name, use (for example): target = SkyCoord.from_name("m31"); 
@@ -44,68 +48,91 @@ target = SkyCoord(ra=83.82208333*u.deg, dec=-5.39111111*u.deg)
 # and will not produce online images.
 console = True
 
-# color type of the camera, "color" for color camera, and "mono" for mono-camera
-color_type = "color"
+# Define the maximum number of processes to be used. Will be overwritten by
+# the command-line parameter.
+nproc_max = int(mp.cpu_count()/2)
 
-# Working directory, all raw or fits files should be in this directory. Will
-# be overwritten by the command-line parameter.
+
+##############################################################
+# Input file and folder parameters
+##############################################################
+# Working directory, all raw or fits files should be in this directory. 
+# Will be overwritten by the command-line parameter.
 working_dir = "./fits"
 
 # Define the input file extension. All files in the working directory with
 # this extension will be used. If this is fits or fit, work in fits mode
 # (usually for an astro-camera), otherwise work in raw mode (usually for a
-# DSLR)
-#
-# Note: Will be overwritten by the command-line parameter.
+# DSLR). Will be overwritten by the command-line parameter.
 extension = "fits"
-
-# Define the maximum number of processes to be used. Will be overwritten by
-# the command-line parameter.
-nproc_max = int(mp.cpu_count()/2)
 
 # Fraction of frames that will not be used
 bad_fraction = 0.2
 
-output_dir = "output"
-
-# Specify whether or not to fix the field rotation (needs the observation
-# time, target and site locations). For an Alt-az mount, this is necessary,
-# but for an equatorial mount this is unnecessary.
-do_fix_ratation = False
-
 # Page number of data in the fits file
 page_num = 0
 
-# Tag for the obs. date and time string (for fits file)
-# date_tag = 'DATE-OBS'
+# Tag in fits file for the obs. date and time information
 date_tag = 'DATE-OBS'
 
-# 2D High-pass cut frequency as a fraction of the Nyquist frequency. Only for
-# alignment to reduce background impacts. Will not affect the frames.
-highpass_cut = 0.01
+output_dir = "output"
 
-# Tukey window alpha parameter, used to improve the matched filtering for
-# example, 0.04 means 2% at each edge (left, right, top, bottom) is suppressed
-# Note that this should match the maximum shifts
-tukey_alpha = 0.2
+
+##############################################################
+# Alignment parameters
+##############################################################
+# 2D High-pass cut frequency as a fraction of the Nyquist frequency. Only for
+# alignment to reduce background impacts. Will not affect the actual frames.
+align_hp_ratio = 0.01
+
+# Tukey window alpha parameter to improve the matched filtering. For example,
+# 0.04 means 2% at each edge (left, right, top, bottom) is suppressed. Note
+# that this should match the maximum shifts
+align_tukey_alpha = 0.2
 
 # sigma of Gaussian filtering (smoothing), only for alignment.
-gauss_sigma = 8
+align_gauss_sigma = 8
 
-# Save aligned binary files or not. Note that for multiprocessing, this must be True
-save_aligned_binary = False
+# rounds of alignment. In each round a new (better) reference frame is chosen.
+# 3 is usually fine.
+align_rounds = 3
 
-# Save aligned images?
-save_aligned_image = False
+# Camera color type for alignment. "color" means RGB (in form of Bayer
+# components) are aligned separately, which will automatically correct the
+# color dispersion due to atmosphere refraction. "mono" means the entire frame
+# is aligned as one, which is much better for a low signal-to-noise ratio.
+align_color_type = "mono"
+
+# Specify whether or not to fix the field rotation (requires the observation
+# time, target and site locations). For an Alt-az mount, this is necessary,
+# but for an equatorial mount this is unnecessary.
+align_fix_ratation = False
 
 # If true, do not report the alignment result
-less_report = True
+align_report = False
 
+
+##############################################################
+# Precision settings
+##############################################################
+# Working precision takes effect in FFT and matrix multiplication
+working_precision = "float32"
+
+# Working precision takes effect in FFT and matrix multiplication
+working_precision_complex = "complex64"
+
+
+##############################################################
+# Other parameters
+##############################################################
 # Number of ADC digit. The maximum value should be 2**adc_digit-1. This should
-# usualLy be 16, even when the actual digit is e.g., 12 or 14 bits.
+# usualLy be 16, even when the actual digit is less, e.g., 12 or 14 bits.
 adc_digit_limit = 16
 
 vmax_global = 2**adc_digit_limit - 1
+
+# file for the reference FFT
+file_ref_fft = "ref_fft.bin"
 
 # field rotation ang file
 file_rot_ang = "field_rot_ang.bin"
@@ -116,32 +143,13 @@ final_file_tif = "final.tiff"
 # Name of the final fits
 final_file_fits = "frame_stacked.fits"
 
-# Working precision takes effect in FFT and matrix multiplication
-working_precision = "float32"
-
-# Working precision takes effect in FFT and matrix multiplication
-working_precision_complex = "complex64"
-
-# check the color type
-if color_type!="color" and color_type!="mono":
-    print("Error! The color type has to be color or mono!")
-    sys.exit()
-
-# determine the working mode, only fits allows fix-rotation
-if extension=="fits" or extension=='fit':
-    mode = "fits"
-else:
-    mode = "raw"
-    do_fix_ratation = False
-
 
 
 ##############################################################
-# Define subroutines, no computation here.
+# Fits related routines:
 ##############################################################
-#
-# read fits file and convert to bin so it can be used by multiprocessing returns: frame, time
-#
+# read fits or raw file and convert to bin so it can be used by
+# multiprocessing returns: frame, time, date type
 def read_frame_fits(file):
     with fits.open(file) as hdu:
         frame = hdu[page_num].data
@@ -170,13 +178,11 @@ def data2hdu(data, cards=None, primary=False):
             hdr.set(card[0], card[1], card[2])
     return hdu
 
-
 # write fits file from a list of HDU
 def hdu2fits(list_of_hdu, file, overwrite=True):
     hdu_list = fits.HDUList(list_of_hdu)
     hdu_list.writeto(file, overwrite=overwrite)
     hdu_list.close()
-
 
 # simple program to write array to fits file
 def write_fits_simple(list_of_data, file, overwrite=True):
@@ -186,6 +192,10 @@ def write_fits_simple(list_of_data, file, overwrite=True):
     hdu2fits(list_of_hdu, file, overwrite=overwrite)
 
 
+
+##############################################################
+# FFT routines:
+##############################################################
 # compute 2d real FFT frequencies as a fraction of the Nyquist frequency
 def rfft2_freq(n1, n2):
     n2r = n2//2 + 1
@@ -194,8 +204,7 @@ def rfft2_freq(n1, n2):
     f = np.sqrt(f1**2 + f2**2)
     return f
 
-
-# wrapper of the frame-to-fft process, including:
+# wrapper of the frame-to-fft process, including pre-processing:
 #
 # 1. A Tukey window to suppress the edge effect.
 #
@@ -206,65 +215,31 @@ def rfft2_freq(n1, n2):
 # 3. Explicit control of the precision to save memory.
 #
 def frame2fft(frame):
-    # reshape to separate the Bayer components
-    frame = frame.reshape(n1s, 2, n2s, 2)
+    frame_shape = frame.shape
 
-    frame_fft = np.zeros([fs1, 2, fs2, 2], dtype=working_precision_complex)
-    for jj in range(2):
-        for kk in range(2):
-            frame1 = (frame[:,jj,:,kk]*win).astype(working_precision).reshape(n1s, n2s)
-            frame1 = ndimage.gaussian_filter(frame1, sigma=gauss_sigma).astype(working_precision)
-            frame_fft[:,jj,:,kk] = fft.rfft2(frame1)
-
-    # restore the shape
-    frame = frame.reshape(n1, n2)
+    if align_color_type=="color":
+        # reshape to separate the Bayer components
+        frame = frame.reshape(n1s, 2, n2s, 2)
+        frame_fft = np.zeros([fs1, 2, fs2, 2], dtype=working_precision_complex)
+        for jj in range(2):
+            for kk in range(2):
+                frame1 = (frame[:,jj,:,kk]*win).astype(working_precision).reshape(n1s, n2s)
+                frame1 = ndimage.gaussian_filter(frame1, sigma=align_gauss_sigma).astype(working_precision)
+                frame_fft[:,jj,:,kk] = fft.rfft2(frame1)
+    else:
+        frame = frame.reshape(n1, n2)
+        frame1 = (frame*win).astype(working_precision)
+        frame1 = ndimage.gaussian_filter(frame1, sigma=align_gauss_sigma).astype(working_precision)
+        frame_fft = fft.rfft2(frame1).astype(working_precision_complex)
+    
+    frame = frame.reshape(frame_shape)
     return frame_fft
 
 
-# align a frame to the reference frame, do it for the four Bayer components
-# separately so the color dispersion will be corrected at the same time.
-def align_frames(i):
-    tst = time.time()
 
-    frame = np.fromfile(file_swp[i], dtype=raw_data_type).reshape(n1s, 2, n2s, 2)
-    frame_fft = frame2fft(frame)
-
-    s1 = np.zeros([2,2], dtype=np.int32)
-    s2 = np.zeros([2,2], dtype=np.int32)
-    # compute the frame offset for each Bayer component and save the offsets
-    for jj in range(2):
-        for kk in range(2):
-            fft_comb = (ref_fft[:,jj,:,kk]*frame_fft[:,jj,:,kk]).reshape(fs1,fs2).astype(working_precision_complex)
-            buff_local = np.abs( fft.irfft2((fft_comb*mask_hp).astype(working_precision_complex)) )
-            index = np.unravel_index(np.argmax(buff_local, axis=None), buff_local.shape)
-            s1[jj,kk], s2[jj,kk] = -index[0], -index[1]
-
-    s1 = periodical_norm(s1, n1s).astype(np.int32)
-    s2 = periodical_norm(s2, n2s).astype(np.int32)
-
-    # For a color camera, the four Bayer components are aligned separately to
-    # fix the color dispersion. However, for a mono-camera, the alignment is
-    # done with the average offsets (computed with circular statistics).
-    if color_type!="color":
-        s1[:,:] = periodical_mean(s1, n1s).astype(np.int32)
-        s2[:,:] = periodical_mean(s2, n2s).astype(np.int32)
-
-    for jj in range(2):
-        for kk in range(2):
-            # fix the offset for one Bayer component and save into the result array
-            frame[:,jj,:,kk] = np.roll( frame[:,jj,:,kk].reshape(n1s, n2s), 
-                (s1[jj,kk], s2[jj,kk]), axis=(0,1) )
-
-    # save the aligned binaries
-    frame = frame.reshape(n1, n2)
-    frame.tofile(file_swp[i])
-    
-    if less_report==False:
-        print("\nFrame %6i (%s) aligned in %8.2f sec, (sx, sy) = (%8i,%8i)." %(i, file_lst[i], time.time()-tst, s1, s2))
-    
-    return i, s1.flatten(), s2.flatten()
-
-
+##############################################################
+# Alignment routines:
+##############################################################
 # normalize periodical data to -period/2~period/2 with circular statistics
 def periodical_norm(x, period):
     ang_rad = x/period*2*np.pi
@@ -273,7 +248,6 @@ def periodical_norm(x, period):
     ang_rad = np.arctan2(sx, cx)
     x1 = ang_rad/2/np.pi*period
     return x1
-
 
 # compute the mean of periodical data
 def periodical_mean(x, period):
@@ -284,6 +258,69 @@ def periodical_mean(x, period):
     x_mean = ang_mean/2/np.pi*period
     return x_mean
 
+# align a frame to the reference frame, do it for the four Bayer components
+# separately so the color dispersion will be corrected at the same time.
+def align_frames(i):
+    tst = time.time()
+
+    frame = np.fromfile(file_swp[i], dtype=raw_data_type).reshape(n1, n2)
+    frame_fft = frame2fft(frame)
+
+    # For a color camera, the four Bayer components are aligned separately to
+    # fix the color dispersion. However, for a mono-camera, the alignment is
+    # done with the average offsets (computed with circular statistics).
+    if align_color_type=="color":
+        ref_fft = np.fromfile(file_ref_fft, dtype=working_precision_complex).reshape(fs1, 2, fs2, 2)
+
+        frame = frame.reshape(n1s, 2, n2s, 2)
+        s1 = np.zeros([2,2], dtype=np.int32)
+        s2 = np.zeros([2,2], dtype=np.int32)
+
+        # compute the frame offset for each Bayer component and save the offsets
+        for jj in range(2):
+            for kk in range(2):
+                fft_comb = (ref_fft[:,jj,:,kk]*frame_fft[:,jj,:,kk]*mask_hp).reshape(fs1,fs2).astype(working_precision_complex)
+                buff_local = np.abs( fft.irfft2(fft_comb) )
+                index = np.unravel_index(np.argmax(buff_local, axis=None), buff_local.shape)
+                s1[jj,kk], s2[jj,kk] = -index[0], -index[1]
+
+        # apply the offset correction
+        s1 = np.round(periodical_norm(s1, n1s)).astype(np.int32)
+        s2 = np.round(periodical_norm(s2, n2s)).astype(np.int32)
+        for jj in range(2):
+            for kk in range(2):
+                # fix the offset for one Bayer component and save into the result array
+                frame[:,jj,:,kk] = np.roll( frame[:,jj,:,kk].reshape(n1s, n2s), 
+                    (s1[jj,kk], s2[jj,kk]), axis=(0,1) )
+    else:
+        ref_fft = np.fromfile(file_ref_fft, dtype=working_precision_complex).reshape(fs1, fs2)
+
+        # compute the frame offset
+        fft_comb = (ref_fft*frame_fft*mask_hp).astype(working_precision_complex)
+        buff_local = np.abs( fft.irfft2(fft_comb) )
+        index = np.unravel_index(np.argmax(buff_local, axis=None), buff_local.shape)
+        s1, s2 = -index[0], -index[1]
+
+        # Avoid corruption of the Bayer matrix
+        s1 = s1 - np.mod(s1, 2)
+        s2 = s2 - np.mod(s2, 2)
+
+        # apply the offset correction
+        s1 = np.round(periodical_norm(s1, n1)).astype(np.int32)
+        s2 = np.round(periodical_norm(s2, n2)).astype(np.int32)
+        frame = np.roll( frame, (s1, s2), axis=(0,1) )
+
+    # save the aligned binaries
+    frame = frame.reshape(n1, n2)
+    frame.tofile(file_swp[i])
+    
+    if align_report==True:
+        print("\nFrame %6i (%s) aligned in %8.2f sec, (sx, sy) = (%8i,%8i)." %(i, file_lst[i], time.time()-tst, s1, s2))
+    
+    if align_color_type=="color":
+        return i, s1.flatten(), s2.flatten()
+    else:
+        return i, s1, s2
 
 # parse the offsets from the starmap() output list
 def parse_offsets(out_list):
@@ -296,6 +333,10 @@ def parse_offsets(out_list):
     return sx, sy
 
 
+
+##############################################################
+# Weights and covariance computation
+##############################################################
 def compute_weights(frames_working):
     # read the alignment results of multiple processes
     tst = time.time()
@@ -303,13 +344,13 @@ def compute_weights(frames_working):
         frame = np.fromfile(file_swp[i], dtype=raw_data_type)
         frames_working[i,:,:] = frame.reshape(n1, n2)
 
-    print("Aligned frames read in, time cost:                        %9.2f" %(time.time()-tst)); tst = time.time()
+    print("Computing weights... Aligned frames read in, time cost:   %9.2f" %(time.time()-tst)); tst = time.time()
 
     # remove the mean value from each frame
     tst = time.time()
     for i in range(0, n_files):
         frames_working[i,:,:] = frames_working[i,:,:] - np.mean(frames_working[i,:,:])
-    print("Mean values of frames removed, time cost:                 %9.2f" %(time.time()-tst)); tst = time.time()
+    print("Computing weights... mean removed from frames, time cost: %9.2f" %(time.time()-tst)); tst = time.time()
     
     # compute the covariance matrix
     frames_working = frames_working.reshape(n_files, n1*n2)
@@ -323,33 +364,10 @@ def compute_weights(frames_working):
     return w
 
 
-# re-scale array (linear) to [vmin, vmax] 
-def rescale_array(x_in, vmin, vmax):
-    x = x_in.copy()
-    xmin, xmax = np.amin(x), np.amax(x)
-    # first to range [0, 1]
-    x = np.float64(x-xmin) / np.float64(xmax-xmin)
-    # then to range [vmin, vmax]
-    x = x*(vmax-vmin) + vmin
-    return x
 
-
-# manually adjust the rgb range
-def adjust_color_manual(rgb, rgb_min, rgb_max, rgb_gamma):
-    global_max = vmax_global
-    r = rescale_array(rgb[:,:,0], rgb_min[0], rgb_max[0])
-    g = rescale_array(rgb[:,:,1], rgb_min[1], rgb_max[1])
-    b = rescale_array(rgb[:,:,2], rgb_min[2], rgb_max[2])
-    r = (r**rgb_gamma[0])*global_max
-    g = (g**rgb_gamma[1])*global_max
-    b = (b**rgb_gamma[2])*global_max
-    rgb_adjusted = rgb*0
-    rgb_adjusted[:,:,0] = r
-    rgb_adjusted[:,:,1] = g
-    rgb_adjusted[:,:,2] = b
-    return rgb_adjusted
-
-
+##############################################################
+# Field rotation routines
+##############################################################
 # convert elevation and azimuth to unit vectors
 def elaz2vec(el, az):
     n = np.size(el)
@@ -360,25 +378,22 @@ def elaz2vec(el, az):
     vec[:,2] = np.sin(el*d2r)
     return vec
 
-
-def len_vec(vec):
+def vec_norm(vec):
     return np.sqrt(np.sum(vec*vec, axis=1))
 
-
 def unit_vec(vec):
-    amp = len_vec(vec)
+    amp = vec_norm(vec)
     vec_nml = vec.copy()
     vec_nml[:,0] = vec_nml[:,0] / amp
     vec_nml[:,1] = vec_nml[:,1] / amp
     vec_nml[:,2] = vec_nml[:,2] / amp
     return vec_nml
 
-
 # Convert a round angle series to an equivalent linear angle series. The idea
 # is: when the difference between two neighbors is bigger than a threshold,
 # all following angles are corrected by 360N degree to minimize the
 # difference.
-def round2linear(ang_in, deg=True, threshold=350):
+def periodical2linear(ang_in, deg=True, threshold=350):
     n = np.size(ang_in)
     ang = ang_in.copy()
     d2r = np.pi/180
@@ -416,7 +431,7 @@ def compute_field_rot(target, hor_ref_frame, debug=False):
     flag = np.where(flag>0, 1, -1)
     # compute field rotation angle by arctan2
     val_cos = np.sum(east_cel*east_hor, axis=1)
-    val_sin = len_vec(vec_cel2hor)
+    val_sin = vec_norm(vec_cel2hor)
     rot_ang = np.arctan2(val_sin, val_cos)*180/np.pi
     # and determine the direction of rotation
     rot_ang = rot_ang * flag
@@ -448,13 +463,27 @@ def fix_rotation(file, angle, raw_data_type, n1, n2):
     frame.tofile(file)
 
 
+
+##############################################################
+# Frame normalization
+##############################################################
+# re-scale array (linear) to [vmin, vmax] 
+def rescale_array(x_in, vmin, vmax):
+    x = x_in.copy()
+    xmin, xmax = np.amin(x), np.amax(x)
+    # first to range [0, 1]
+    x = np.float64(x-xmin) / np.float64(xmax-xmin)
+    # then to range [vmin, vmax]
+    x = x*(vmax-vmin) + vmin
+    return x
+
 # Re-scale the stacked frame values to avoid problem in type conversion to
 # uint16. Do it separately for the four Bayer matrices.
 def normalize_frame(frame, vmin, vmax):
     frame_norm = frame.copy()
     shape = np.shape(frame_norm)
     n1, n2 = shape[0], shape[1]
-    frame_norm = frame_norm.reshape(n1s, 2, n2s, 2)
+    frame_norm = frame_norm.reshape(int(n1/2), 2, int(n2/2), 2)
     frame_norm[:,0,:,0] = rescale_array(frame_norm[:,0,:,0], vmin, vmax)
     frame_norm[:,0,:,1] = rescale_array(frame_norm[:,0,:,1], vmin, vmax)
     frame_norm[:,1,:,0] = rescale_array(frame_norm[:,1,:,0], vmin, vmax)
@@ -479,7 +508,12 @@ def normalize_frame(frame, vmin, vmax):
 ##############################################################
 
 
+
+##############################################################
+# Initialization
+##############################################################
 # in console mode, do not produce online images (but will save pdf)
+tst = time.time()
 if console == True:
     matplotlib.use('Agg')
     if len(sys.argv)==4:
@@ -495,6 +529,17 @@ else:
     # Improve the display effect of Jupyter notebook
     from IPython.core.display import display, HTML
 
+# check the color type
+if align_color_type!="color" and align_color_type!="mono":
+    print("Error! The color type has to be color or mono!")
+    sys.exit()
+
+# determine the working mode, only fits allows fix-rotation
+if extension=="fits" or extension=='fit':
+    mode = "fits"
+else:
+    mode = "raw"
+    align_fix_ratation = False
 
 # make a list of working files and determine the number of processes to be used
 os.chdir(working_dir)
@@ -533,26 +578,31 @@ else:
 
 n1 = np.int64(np.shape(ref_frame)[0])
 n2 = np.int64(np.shape(ref_frame)[1])
-n1s = int(n1/2)
-n2s = int(n2/2)
+if align_color_type=='color':
+    n1s = int(n1/2)
+    n2s = int(n2/2)
+else:
+    n1s = n1
+    n2s = n2
 
 # make the 2D-tukey window
-w1 = tukey(n1s, alpha=tukey_alpha)
-w2 = tukey(n2s, alpha=tukey_alpha)
+w1 = tukey(n1s, alpha=align_tukey_alpha)
+w2 = tukey(n2s, alpha=align_tukey_alpha)
 win = np.dot(w1.reshape(n1s, 1), w2.reshape(1, n2s))
 
 # make a low-pass window in the Fourier domain
 freq = rfft2_freq(n1s, n2s)
 fs1, fs2 = (freq.shape)[0], (freq.shape)[1]
-mask_hp = np.where(freq<highpass_cut, 0, 1)
+mask_hp = np.where(freq<align_hp_ratio, 0, 1)
 
-ref_fft = np.conjugate( frame2fft(ref_frame) )
+print("Initialization done, time cost:                           %9.2f" %(time.time()-tst))
 
+
+
+##############################################################
 # read the frames by main
+##############################################################
 if __name__ == '__main__':
-    # prepare the working array
-    frames_working = np.zeros([n_files, n1, n2], dtype=working_precision)
-    
     # read frames, save the observation times, and compute the local
     # horizontal reference frames accordingly
     tst = time.time()
@@ -564,14 +614,17 @@ if __name__ == '__main__':
             frame1, time1, _ = read_frame_raw(file_lst[i])
         frame1.tofile(file_swp[i])
         datetime.append(time1)
-        frames_working[i,:,:] = frame1
     print("Frames read and cached by the main proc, time cost:       %9.2f" %(time.time()-tst))
 
-# fix rotation if necessary (multi-processes)
-if __name__ == '__main__' and do_fix_ratation==True:
+
+
+##############################################################
+# Fix field rotations if necessary (multi-processes)
+##############################################################
+if __name__ == '__main__' and align_fix_ratation==True:
     tst = time.time()
     obstime_list = astro_time(datetime) - ahu_zone*u.hour
-    hor_ref_frame = AltAz(obstime=obstime_list, location=ahu_observatory)
+    hor_ref_frame = AltAz(obstime=obstime_list, location=ahu_site)
 
     # compute the reletive time in seconds, and subtract the median value to minimize the rotations
     rel_sec = (obstime_list - obstime_list[0]).to_value(format='sec')
@@ -605,90 +658,64 @@ if __name__ == '__main__' and do_fix_ratation==True:
         output = [pool.starmap(fix_rotation, zip(p1, p2, p3, p4, p5))]
     print("Field rotation fixed, time cost:                          %9.2f" %(time.time()-tst) )
 
-# For all processes: if fix-rotation is required, then read rot_ang from file and 
-# reset the reference frame to the one with least rotation (frame already fixed)
-if do_fix_ratation==True:
+# For all processes: if fix-rotation is required, then read rot_ang from file
+# and reset the reference frame to the one with least rotation (frame already
+# fixed)
+if align_fix_ratation==True:
     file = os.path.join(fullpath,output_dir,file_rot_ang)
     rot_ang = np.fromfile(file, dtype=working_precision)
     wid = np.argmin(np.abs(rot_ang))
-    ref_frame = np.fromfile(file_swp[wid], dtype=raw_data_type).reshape(n1, n2)
-    ref_fft = np.conjugate( frame2fft(ref_frame) )
-    
+
+
+
+##############################################################
+# Alignment (multi-processes)
+##############################################################
 if __name__ == '__main__':
-    # The first round alignment
-    tst = time.time()
-    with mp.Pool(nproc) as pool:
-        output = pool.map(align_frames, range(n_files))
-    print("Initial alignment done, time cost:                        %9.2f" %(time.time()-tst))
+    wid, sx, sy = 0, [], []
+    frames_working = np.zeros([n_files, n1, n2], dtype=working_precision)
 
-    # parse the output and save the offsets
-    sx1, sy1 = parse_offsets(output)
+    tst_tot = time.time()
+    for nar in range(align_rounds):
+        print("****************************************************")
+        print("Alignment round %4i: Frame %4i is the current reference frame." %(nar+1, wid))
+        print("The current reference file is: %s" %(file_lst[wid]))
 
-    # identify the frame of maximum weight, and use it as the new reference frame.
-    w = compute_weights(frames_working)
-    wid = np.argmax(w)
-    ref_frame = np.fromfile(file_swp[wid], dtype=raw_data_type).reshape(n1, n2)
-    ref_fft = np.conjugate( frame2fft(ref_frame) )
+        tst = time.time()
+        ref_frame = np.fromfile(file_swp[wid], dtype=raw_data_type).reshape(n1, n2)
+        ref_fft = np.conjugate( frame2fft(ref_frame) )
+        ref_fft.tofile(file_ref_fft)
+
+        with mp.Pool(nproc) as pool:
+            output = pool.map(align_frames, range(n_files))
+        print("Alignment round %4i done, time cost:                     %9.2f" %(nar+1, time.time()-tst))
+
+        # parse the output and save the offsets
+        sx_now, sy_now = parse_offsets(output)
+        sx.append(sx_now)
+        sy.append(sy_now)
+
+        # identify the frame of maximum weight, and use it as the new reference frame.
+        w = compute_weights(frames_working)
+        wid1 = np.argmax(w)
+        if wid1 == wid: 
+            break
+        else:
+            wid = wid1
+
     print("****************************************************")
-    print("Frame %i is chosen as the new reference frame. All frames will be re-aligned." %(wid))
-    print("The new reference file is: %s" %(file_lst[wid]))
+    print("Alignment done in %4i rounds, time cost:                 %9.2f" %(nar+1, time.time()-tst_tot))
+    print("Frame %4i is the final reference frame." %(wid))
+    print("The final reference file is: %s" %(file_lst[wid]))
     print("****************************************************")
-    
-    # work with multiprocessing to align the frames again, and remove the swp files
-    tst = time.time()
-    with mp.Pool(nproc) as pool:
-        output = pool.map(align_frames, range(n_files))
-    print("Final alignment done, time cost:                          %9.2f" %(time.time()-tst))
 
-    # parse the output and save the offsets
-    sx2, sy2 = parse_offsets(output)
 
-    # plot the XY-shifts
-    plt.figure(figsize=(6,4), dpi=200)
-    plt.title('XY shifts in pixel')
-    plt.xlabel('X shifts', fontsize=9)
-    plt.ylabel('Y shifts', fontsize=9)
-    
-    if color_type=="color":
-        plt.scatter(sy1[:,0].flatten(), sx1[:,0].flatten(), s=50, c='r', alpha=0.5, label='Round 1, Bayer-00')
-        plt.scatter(sy1[:,1].flatten(), sx1[:,1].flatten(), s=30, c='g', alpha=0.5, label='Round 1, Bayer-01')
-        plt.scatter(sy1[:,2].flatten(), sx1[:,2].flatten(), s=30, c='g', alpha=0.5, label='Round 1, Bayer-10')
-        plt.scatter(sy1[:,3].flatten(), sx1[:,3].flatten(), s=10, c='b', alpha=0.5, label='Round 1, Bayer-11')
-        
-        plt.scatter(sy2[:,0].flatten(), sx2[:,0].flatten(), s=50, c='k', alpha=0.5, label='Round 2, Bayer-00')
-        plt.scatter(sy2[:,1].flatten(), sx2[:,1].flatten(), s=50, c='k', alpha=0.5, label='Round 2, Bayer-01')
-        plt.scatter(sy2[:,2].flatten(), sx2[:,2].flatten(), s=50, c='k', alpha=0.5, label='Round 2, Bayer-10')
-        plt.scatter(sy2[:,3].flatten(), sx2[:,3].flatten(), s=50, c='k', alpha=0.5, label='Round 2, Bayer-11')
-    else:
-        TT = np.arange(n_files)
-        plt.scatter(sy1[:,0].flatten(), sx1[:,0].flatten(), s=20, c=TT, alpha=0.5, label='Round 1')
-        plt.scatter(sy2[:,0].flatten(), sx2[:,0].flatten(), s=50, c=TT, alpha=0.5, label='Round 2')
-
-    plt.legend()
-    plt.savefig(os.path.join(fullpath,output_dir,'xy-shifts.pdf'))
-    
-    # recompute the weights
-    tst = time.time()
-    w = compute_weights(frames_working)
     # exclude the low quality frames
     n_bad = int(n_files*bad_fraction)
     thr = hp.nsmallest(n_bad, w)[n_bad-1]
     if thr<0: thr = 0
     w = np.where(w <= thr, 0, w)
     w = w / np.sum(w)
-    print("Final weights computed, time cost:                        %9.2f" %(time.time()-tst))
-    
-    # plot the weights for test 
-    plt.figure(figsize=(4,2), dpi=200)
-    plt.title(r'Stacking weights ($w\times N_{frames}$)')
-    plt.xlabel('Frame number', fontsize=9)
-    plt.ylabel(r'$w\times N_{frames}$', fontsize=9)
-    w1 = np.where(w==0, np.nan, w)
-    w2 = np.where(w==0, np.nanmean(w1), np.nan)
-    plt.plot(w1*n_files*(1-bad_fraction), marker="o", label='Valid')
-    plt.plot(w2*n_files*(1-bad_fraction), marker="*", label='Invalid')
-    plt.legend()
-    plt.savefig(os.path.join(fullpath,output_dir,'weights.pdf'))
 
     # stack the frames with weights.
     tst = time.time()
@@ -700,12 +727,55 @@ if __name__ == '__main__':
     file_stacked = os.path.join(fullpath,output_dir,final_file_fits)
     write_fits_simple([frame_stacked.astype(raw_data_type)], file_stacked, overwrite=True)
 
-    print("Stacked frame obtained from %i/%i best frames, time cost: %9.2f" 
+    print("Stacked frame get from %4i/%4i best frames, time cost:    %9.2f" 
         %(n_files-n_bad, n_files, time.time()-tst))
 
     # clear swap files
     for file in file_swp:
         os.remove(file)
+
+    os.remove(file_ref_fft)
+
+    # plot the XY-shifts
+    w_mask = np.where(w==0, np.nan, 1)
+
+    plt.figure(figsize=(6,4), dpi=200)
+    plt.title('XY shifts in pixel')
+    plt.xlabel('X shifts', fontsize=9)
+    plt.ylabel('Y shifts', fontsize=9)
+    
+    if align_color_type=="color":
+        if nar>0:
+            plt.scatter(sy[-2][:,0]*w_mask, sx[-2][:,0]*w_mask, s=50, c='r', alpha=0.5, label='Round 1, Bayer-00')
+            plt.scatter(sy[-2][:,1]*w_mask, sx[-2][:,1]*w_mask, s=30, c='g', alpha=0.5, label='Round 1, Bayer-01')
+            plt.scatter(sy[-2][:,2]*w_mask, sx[-2][:,2]*w_mask, s=30, c='g', alpha=0.5, label='Round 1, Bayer-10')
+            plt.scatter(sy[-2][:,3]*w_mask, sx[-2][:,3]*w_mask, s=10, c='b', alpha=0.5, label='Round 1, Bayer-11')
+        
+        plt.scatter(sy[-1][:,0]*w_mask, sx[-1][:,0]*w_mask, s=50, c='k', alpha=0.5, label='Round 2, Bayer-00')
+        plt.scatter(sy[-1][:,1]*w_mask, sx[-1][:,1]*w_mask, s=50, c='k', alpha=0.5, label='Round 2, Bayer-01')
+        plt.scatter(sy[-1][:,2]*w_mask, sx[-1][:,2]*w_mask, s=50, c='k', alpha=0.5, label='Round 2, Bayer-10')
+        plt.scatter(sy[-1][:,3]*w_mask, sx[-1][:,3]*w_mask, s=50, c='k', alpha=0.5, label='Round 2, Bayer-11')
+    else:
+        TT = np.arange(n_files)
+        if nar>0:
+            plt.scatter(sy[-2]*w_mask, sx[-2]*w_mask, s=50, c=TT, alpha=0.5, label='Round 1')
+        plt.scatter(sy[-1]*w_mask, sx[-1]*w_mask, s=15, c='k', alpha=0.5, label='Round 2')
+
+    plt.legend()
+    plt.savefig(os.path.join(fullpath,output_dir,'xy-shifts.pdf'))
+
+
+    # plot the weights for test 
+    plt.figure(figsize=(6,4), dpi=200)
+    plt.title(r'Stacking weights ($w\times N_{frames}$)')
+    plt.xlabel('Frame number', fontsize=9)
+    plt.ylabel(r'$w\times N_{frames}$', fontsize=9)
+    w1 = np.where(w==0, np.nan, w)
+    w2 = np.where(w==0, np.nanmean(w1), np.nan)
+    plt.plot(w1*n_files*(1-bad_fraction), marker="o", label='Valid')
+    plt.plot(w2*n_files*(1-bad_fraction), marker="*", label='Invalid')
+    plt.legend()
+    plt.savefig(os.path.join(fullpath,output_dir,'weights.pdf'))
 
     print("Done!")
 
@@ -725,6 +795,25 @@ if __name__ == '__main__':
 
 
 
+
+
+
+
+
+# # manually adjust the rgb range
+# def adjust_color_manual(rgb, rgb_min, rgb_max, rgb_gamma):
+#     global_max = vmax_global
+#     r = rescale_array(rgb[:,:,0], rgb_min[0], rgb_max[0])
+#     g = rescale_array(rgb[:,:,1], rgb_min[1], rgb_max[1])
+#     b = rescale_array(rgb[:,:,2], rgb_min[2], rgb_max[2])
+#     r = (r**rgb_gamma[0])*global_max
+#     g = (g**rgb_gamma[1])*global_max
+#     b = (b**rgb_gamma[2])*global_max
+#     rgb_adjusted = rgb*0
+#     rgb_adjusted[:,:,0] = r
+#     rgb_adjusted[:,:,1] = g
+#     rgb_adjusted[:,:,2] = b
+#     return rgb_adjusted
 
 
     # tst = time.time()
