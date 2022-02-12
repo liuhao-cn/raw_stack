@@ -85,7 +85,7 @@ output_dir = "output"
 # components) are aligned separately, which will automatically correct the
 # color dispersion due to atmosphere refraction. "mono" means the entire frame
 # is aligned as one, which is much better for a low signal-to-noise ratio.
-align_color_type = "color"
+align_color_mode = "color"
 
 # 2D High-pass cut frequency as a fraction of the Nyquist frequency. Only for
 # alignment to reduce background impacts. Will not affect the actual frames.
@@ -217,7 +217,7 @@ def rfft2_freq(n1, n2):
 def frame2fft(frame):
     shape = frame.shape
 
-    if align_color_type=="color":
+    if align_color_mode=="color":
         # reshape to separate the Bayer components
         frame = frame.reshape(n1s, 2, n2s, 2)
         frame_fft = np.zeros([fs1, 2, fs2, 2], dtype=working_precision_complex)
@@ -261,7 +261,7 @@ def periodical_mean(x, period):
 def make_ref_fft(wid):
     global ref_fft
     ref_fft = np.fromfile(file_ref_fft, dtype=working_precision_complex)
-    if align_color_type=="color":
+    if align_color_mode=="color":
         ref_fft = ref_fft.reshape(fs1, 2, fs2, 2)
     else:
         ref_fft = ref_fft.reshape(fs1, fs2)
@@ -277,7 +277,7 @@ def align_frames(i):
     # For a color camera, the four Bayer components are aligned separately to
     # fix the color dispersion. However, for a mono-camera, the alignment is
     # done with the average offsets (computed with circular statistics).
-    if align_color_type=="color":
+    if align_color_mode=="color":
         frame = frame.reshape(n1s, 2, n2s, 2)
         s1 = np.zeros([2,2], dtype=np.int32)
         s2 = np.zeros([2,2], dtype=np.int32)
@@ -321,7 +321,7 @@ def align_frames(i):
     if align_report==True:
         print("\nFrame %6i (%s) aligned in %8.2f sec, (sx, sy) = (%8i,%8i)." %(i, file_lst[i], time.time()-tst, s1, s2))
     
-    if align_color_type=="color":
+    if align_color_mode=="color":
         return i, s1.flatten(), s2.flatten()
     else:
         return i, s1, s2
@@ -530,7 +530,7 @@ else:
     from IPython.core.display import display, HTML
 
 # check the color type
-if align_color_type!="color" and align_color_type!="mono":
+if align_color_mode!="color" and align_color_mode!="mono":
     print("Error! The color type has to be color or mono!")
     sys.exit()
 
@@ -577,7 +577,7 @@ else:
 
 n1 = np.int64(np.shape(frame)[0])
 n2 = np.int64(np.shape(frame)[1])
-if align_color_type=='color':
+if align_color_mode=='color':
     n1s = np.int64(n1/2)
     n2s = np.int64(n2/2)
 else:
@@ -752,7 +752,7 @@ if __name__ == '__main__':
     plt.xlabel('X shifts', fontsize=9)
     plt.ylabel('Y shifts', fontsize=9)
     
-    if align_color_type=="color":
+    if align_color_mode=="color":
         if nar>0:
             plt.scatter(sy[-2][:,0]*w_mask, sx[-2][:,0]*w_mask, s=50, c='r', alpha=0.5, label='Round 1, Bayer-00')
             plt.scatter(sy[-2][:,1]*w_mask, sx[-2][:,1]*w_mask, s=30, c='g', alpha=0.5, label='Round 1, Bayer-01')
