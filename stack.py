@@ -81,6 +81,12 @@ output_dir = "output"
 ##############################################################
 # Alignment parameters
 ##############################################################
+# Camera color type for alignment. "color" means RGB (in form of Bayer
+# components) are aligned separately, which will automatically correct the
+# color dispersion due to atmosphere refraction. "mono" means the entire frame
+# is aligned as one, which is much better for a low signal-to-noise ratio.
+align_color_type = "color"
+
 # 2D High-pass cut frequency as a fraction of the Nyquist frequency. Only for
 # alignment to reduce background impacts. Will not affect the actual frames.
 align_hp_ratio = 0.01
@@ -96,12 +102,6 @@ align_gauss_sigma = 8
 # rounds of alignment. In each round a new (better) reference frame is chosen.
 # 3 is usually fine.
 align_rounds = 3
-
-# Camera color type for alignment. "color" means RGB (in form of Bayer
-# components) are aligned separately, which will automatically correct the
-# color dispersion due to atmosphere refraction. "mono" means the entire frame
-# is aligned as one, which is much better for a low signal-to-noise ratio.
-align_color_type = "mono"
 
 # Specify whether or not to fix the field rotation (requires the observation
 # time, target and site locations). For an Alt-az mount, this is necessary,
@@ -258,6 +258,14 @@ def periodical_mean(x, period):
     x_mean = ang_mean/2/np.pi*period
     return x_mean
 
+def make_ref_fft(wid):
+    global ref_fft
+    ref_fft = np.fromfile(file_ref_fft, dtype=working_precision_complex)
+    if align_color_type=="color":
+        ref_fft = ref_fft.reshape(fs1, 2, fs2, 2)
+    else:
+        ref_fft = ref_fft.reshape(fs1, fs2)
+
 # align a frame to the reference frame, do it for the four Bayer components
 # separately so the color dispersion will be corrected at the same time.
 def align_frames(i):
@@ -270,8 +278,6 @@ def align_frames(i):
     # fix the color dispersion. However, for a mono-camera, the alignment is
     # done with the average offsets (computed with circular statistics).
     if align_color_type=="color":
-        ref_fft = np.fromfile(file_ref_fft, dtype=working_precision_complex).reshape(fs1, 2, fs2, 2)
-
         frame = frame.reshape(n1s, 2, n2s, 2)
         s1 = np.zeros([2,2], dtype=np.int32)
         s2 = np.zeros([2,2], dtype=np.int32)
@@ -293,8 +299,6 @@ def align_frames(i):
                 frame[:,jj,:,kk] = np.roll( frame[:,jj,:,kk].reshape(n1s, n2s), 
                     (s1[jj,kk], s2[jj,kk]), axis=(0,1) )
     else:
-        ref_fft = np.fromfile(file_ref_fft, dtype=working_precision_complex).reshape(fs1, fs2)
-
         # compute the frame offset
         fft_comb = (ref_fft*frame_fft*mask_hp).astype(working_precision_complex)
         buff_local = np.abs( fft.irfft2(fft_comb) )
@@ -407,7 +411,6 @@ def periodical2linear(ang_in, deg=True, threshold=350):
             ang[i+1:n] = ang[i+1:n] + dif1 - dif
     return ang/d2r
 
-
 # compute the field rotation, return continuous angle, but can also return
 # arccos values by debug=True (discontinuous, only for debug)
 def compute_field_rot(target, hor_ref_frame, debug=False):
@@ -438,7 +441,6 @@ def compute_field_rot(target, hor_ref_frame, debug=False):
     if debug==True:
         rot_ang = np.arccos(val_cos)*180/np.pi
     return rot_ang
-
 
 # note: need to check if we should multiply -1 to angle. 
 # note: the four Bayer blocks are rotated separately so as not to corrupt the Bayer matrix.
@@ -532,7 +534,7 @@ if align_color_type!="color" and align_color_type!="mono":
     print("Error! The color type has to be color or mono!")
     sys.exit()
 
-# determine the working mode, only fits allows fix-rotation
+# determine the working mode, only fits allows field rotation correction
 if extension=="fits" or extension=='fit':
     mode = "fits"
 else:
@@ -550,47 +552,47 @@ for file in os.listdir():
     if file.endswith(extension):
         file_lst.append(file)
 
+# sort the file list and then build auxiliary file lists accordingly
+file_lst.sort()
+for file in file_lst:
+    file_swp.append(os.path.splitext(file)[0] + '.swp')
+
 n_files = np.int64(len(file_lst))
 if n_files<2:
-    print("Too few files, maybe check the directory name or extension?")
+    print("Too few files, check the dir/file name or extension?")
+    print("Usage: python stack.py dir_of_inputs file_extension number_of_cores")
+    print("or (on cluster): sbatch file_of_sbash_script stack.py dir_of_inputs file_extension number_of_cores")
     sys.exit()
 
 if nproc_max > n_files:
     nproc = n_files
 else:
     nproc = nproc_max
-    
-# sort the file list and then build auxiliary file lists accordingly
-file_lst.sort()
-for file in file_lst:
-    file_swp.append(os.path.splitext(file)[0] + '.swp')
 
 # use the first file as the initial reference file
 if mode=="fits":
-    ref_frame, _, raw_data_type = read_frame_fits(file_lst[0]) 
-elif mode=="raw":
-    ref_frame, _, raw_data_type = read_frame_raw(file_lst[0]) 
+    frame, _, raw_data_type = read_frame_fits(file_lst[0]) 
 else:
-    print("Error! Unknown working mode %s, please check extension!" %(mode))
+    frame, _, raw_data_type = read_frame_raw(file_lst[0]) 
 
-
-n1 = np.int64(np.shape(ref_frame)[0])
-n2 = np.int64(np.shape(ref_frame)[1])
+n1 = np.int64(np.shape(frame)[0])
+n2 = np.int64(np.shape(frame)[1])
 if align_color_type=='color':
-    n1s = int(n1/2)
-    n2s = int(n2/2)
+    n1s = np.int64(n1/2)
+    n2s = np.int64(n2/2)
 else:
     n1s = n1
     n2s = n2
 
 # make the 2D-tukey window
-w1 = tukey(n1s, alpha=align_tukey_alpha)
-w2 = tukey(n2s, alpha=align_tukey_alpha)
-win = np.dot(w1.reshape(n1s, 1), w2.reshape(1, n2s))
+w1 = tukey(n1s, alpha=align_tukey_alpha).reshape(n1s, 1)
+w2 = tukey(n2s, alpha=align_tukey_alpha).reshape(1, n2s)
+win = np.dot(w1, w2)
 
 # make a low-pass window in the Fourier domain
 freq = rfft2_freq(n1s, n2s)
-fs1, fs2 = (freq.shape)[0], (freq.shape)[1]
+fs = freq.shape
+fs1, fs2 = fs[0], fs[1]
 mask_hp = np.where(freq<align_hp_ratio, 0, 1)
 
 print("Initialization done, time cost:                           %9.2f" %(time.time()-tst))
@@ -607,11 +609,11 @@ if __name__ == '__main__':
     datetime = []
     for i in range(n_files):
         if mode=="fits":
-            frame1, time1, _ = read_frame_fits(file_lst[i])
+            frame, datet, _ = read_frame_fits(file_lst[i])
         elif mode=="raw":
-            frame1, time1, _ = read_frame_raw(file_lst[i])
-        frame1.tofile(file_swp[i])
-        datetime.append(time1)
+            frame, datet, _ = read_frame_raw(file_lst[i])
+        frame.tofile(file_swp[i])
+        datetime.append(datet)
     print("Frames read and cached by the main proc, time cost:       %9.2f" %(time.time()-tst))
 
 
@@ -669,6 +671,7 @@ if align_fix_ratation==True:
 ##############################################################
 # Alignment (multi-processes)
 ##############################################################
+ref_fft = np.zeros([fs1, fs2], dtype=working_precision_complex)
 if __name__ == '__main__':
     wid, sx, sy = 0, [], []
     frames_working = np.zeros([n_files, n1, n2], dtype=working_precision)
@@ -679,10 +682,17 @@ if __name__ == '__main__':
         print("Alignment round %4i: Frame %4i is the current reference frame." %(nar+1, wid))
         print("The current reference file is: %s" %(file_lst[wid]))
 
+        # compute the reference frame fft by the main process
         tst = time.time()
         ref_frame = np.fromfile(file_swp[wid], dtype=raw_data_type).reshape(n1, n2)
         ref_fft = np.conjugate( frame2fft(ref_frame) )
         ref_fft.tofile(file_ref_fft)
+
+        # read the reference frame fft into sub-processes
+        wlist = []
+        for i in range(n_files): wlist.append(wid)
+        with mp.Pool(nproc) as pool:
+            output = pool.map(make_ref_fft, wlist)
 
         with mp.Pool(nproc) as pool:
             output = pool.map(align_frames, range(n_files))
