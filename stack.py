@@ -153,10 +153,10 @@ final_file_fits = "frame_stacked.fits"
 def read_frame_fits(file):
     with fits.open(file) as hdu:
         frame = hdu[page_num].data
-        raw_data_type = frame.dtype
+        data_type = frame.dtype
         hdr = hdu[page_num].header
         date_str = hdr[date_tag]
-    return frame, date_str, raw_data_type
+    return frame, date_str, data_type
 
 def read_frame_raw(file):
     with rawpy.imread(file) as raw:
@@ -215,7 +215,7 @@ def rfft2_freq(n1, n2):
 # 3. Explicit control of the precision to save memory.
 #
 def frame2fft(frame):
-    frame_shape = frame.shape
+    shape = frame.shape
 
     if align_color_type=="color":
         # reshape to separate the Bayer components
@@ -232,7 +232,7 @@ def frame2fft(frame):
         frame1 = ndimage.gaussian_filter(frame1, sigma=align_gauss_sigma).astype(working_precision)
         frame_fft = fft.rfft2(frame1).astype(working_precision_complex)
     
-    frame = frame.reshape(frame_shape)
+    frame = frame.reshape(shape)
     return frame_fft
 
 
@@ -500,11 +500,9 @@ def normalize_frame(frame, vmin, vmax):
 ##############################################################
 # Do the following:
 # 1. Align the frames using the initial reference frame.
-# 2. Compute the weights from the covarinace matrix.
-# 3. Set the reference frame to the one with highest weight.
-# 4. Re-align the frames using the new reference frame.
-# 5. Re-compute the weights from the covarinace matrix.
-# 6. Stack the frames with weights.
+# 2. Compute the weights from the covariance matrix.
+# 3. Set the reference frame to the one with highest weight and iterate.
+# 4. Stack the frames with the final weights.
 ##############################################################
 
 
