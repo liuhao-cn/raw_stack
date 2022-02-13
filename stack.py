@@ -357,8 +357,10 @@ def compute_weights(frames_working):
     print("Computing weights... mean removed from frames, time cost: %9.2f" %(time.time()-tst)); tst = time.time()
     
     # compute the covariance matrix
+    tst = time.time()
     frames_working = frames_working.reshape(n_files, n1*n2)
     cov = np.dot(frames_working, frames_working.transpose())
+    print("Computing weights... cov-matrix obtained, time cost:      %9.2f" %(time.time()-tst)); tst = time.time()
 
     # compute weights from the covariance matrix
     w = np.zeros(n_files)
@@ -512,9 +514,9 @@ def normalize_frame(frame, vmin, vmax):
 ##############################################################
 # Initialization
 ##############################################################
-# in console mode, do not produce online images (but will save pdf)
 tst = time.time()
 if console == True:
+    # in console mode, do not produce online images (but will save pdf)
     matplotlib.use('Agg')
     if len(sys.argv)==4:
         working_dir = sys.argv[1]
@@ -717,7 +719,6 @@ if __name__ == '__main__':
     print("Frame %4i is the final reference frame." %(wid))
     print("The final reference file is: %s" %(file_lst[wid]))
     print("****************************************************")
-
 
     # exclude the low quality frames
     n_bad = int(n_files*bad_fraction)
