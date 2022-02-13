@@ -15,6 +15,7 @@ import numpy as np
 import multiprocessing as mp
 import matplotlib.pyplot as plt
 import heapq as hp
+import astropy.units as u
 
 from scipy import ndimage
 from scipy import fft
@@ -24,7 +25,7 @@ from astropy.io import fits
 from astropy.coordinates import SkyCoord, EarthLocation, AltAz
 from astropy.time import Time as astro_time
 from astropy.time import TimezoneInfo
-import astropy.units as u
+from multiprocessing.managers import SharedMemoryManager
 
 
 ##############################################################
@@ -58,13 +59,13 @@ nproc_max = int(mp.cpu_count()/2)
 ##############################################################
 # Working directory, all raw or fits files should be in this directory. 
 # Will be overwritten by the command-line parameter.
-working_dir = "./fits"
+working_dir = "/work/astro/m42"
 
 # Define the input file extension. All files in the working directory with
 # this extension will be used. If this is fits or fit, work in fits mode
 # (usually for an astro-camera), otherwise work in raw mode (usually for a
 # DSLR). Will be overwritten by the command-line parameter.
-extension = "fits"
+extension = "fit"
 
 # Fraction of frames that will not be used
 bad_fraction = 0.2
@@ -116,10 +117,10 @@ align_report = False
 # Precision settings
 ##############################################################
 # Working precision takes effect in FFT and matrix multiplication
-working_precision = "float32"
+working_precision = np.dtype("float32")
 
 # Working precision takes effect in FFT and matrix multiplication
-working_precision_complex = "complex64"
+working_precision_complex = np.dtype("complex64")
 
 
 ##############################################################
@@ -130,9 +131,6 @@ working_precision_complex = "complex64"
 adc_digit_limit = 16
 
 vmax_global = 2**adc_digit_limit - 1
-
-# file for the reference FFT
-file_ref_fft = "ref_fft.bin"
 
 # field rotation ang file
 file_rot_ang = "field_rot_ang.bin"
@@ -156,13 +154,13 @@ def read_frame_fits(file):
         data_type = frame.dtype
         hdr = hdu[page_num].header
         date_str = hdr[date_tag]
-    return frame, date_str, data_type
+    return frame, date_str, data_type.name
 
 def read_frame_raw(file):
     with rawpy.imread(file) as raw:
-        raw_data_type = raw.raw_image.dtype
+        data_type = raw.raw_image.dtype
         frame = raw.raw_image.copy()
-    return frame, None, raw_data_type
+    return frame, None, data_type.name
 
 # make HDU with property cards
 def data2hdu(data, cards=None, primary=False):
@@ -220,7 +218,7 @@ def frame2fft(frame):
     if align_color_mode=="color":
         # reshape to separate the Bayer components
         frame = frame.reshape(n1s, 2, n2s, 2)
-        frame_fft = np.zeros([fs1, 2, fs2, 2], dtype=working_precision_complex)
+        frame_fft = np.zeros([f1s, 2, f2s, 2], dtype=working_precision_complex)
         for jj in range(2):
             for kk in range(2):
                 frame1 = (frame[:,jj,:,kk]*win).astype(working_precision).reshape(n1s, n2s)
@@ -258,20 +256,14 @@ def periodical_mean(x, period):
     x_mean = ang_mean/2/np.pi*period
     return x_mean
 
-def make_ref_fft(wid):
-    global ref_fft
-    ref_fft = np.fromfile(file_ref_fft, dtype=working_precision_complex)
-    if align_color_mode=="color":
-        ref_fft = ref_fft.reshape(fs1, 2, fs2, 2)
-    else:
-        ref_fft = ref_fft.reshape(fs1, fs2)
-
 # align a frame to the reference frame, do it for the four Bayer components
 # separately so the color dispersion will be corrected at the same time.
 def align_frames(i):
+    global frames_working
+
     tst = time.time()
 
-    frame = np.fromfile(file_swp[i], dtype=raw_data_type).reshape(n1, n2)
+    frame = frames_working[i,:,:]
     frame_fft = frame2fft(frame)
 
     # For a color camera, the four Bayer components are aligned separately to
@@ -285,7 +277,7 @@ def align_frames(i):
         # compute the frame offset for each Bayer component and save the offsets
         for jj in range(2):
             for kk in range(2):
-                fft_comb = (ref_fft[:,jj,:,kk]*frame_fft[:,jj,:,kk]*mask_hp).reshape(fs1,fs2).astype(working_precision_complex)
+                fft_comb = (ref_fft[:,jj,:,kk]*frame_fft[:,jj,:,kk]*mask_hp).reshape(f1s,f2s).astype(working_precision_complex)
                 buff_local = np.abs( fft.irfft2(fft_comb) )
                 index = np.unravel_index(np.argmax(buff_local, axis=None), buff_local.shape)
                 s1[jj,kk], s2[jj,kk] = -index[0], -index[1]
@@ -314,10 +306,9 @@ def align_frames(i):
         s2 = np.round(periodical_norm(s2, n2)).astype(np.int32)
         frame = np.roll( frame, (s1, s2), axis=(0,1) )
 
-    # save the aligned binaries
-    frame = frame.reshape(n1, n2)
-    frame.tofile(file_swp[i])
-    
+    # save the aligned binaries (without mean)
+    frames_working[i,:,:] = frame.reshape(n1, n2) - np.mean(frame)
+
     if align_report==True:
         print("\nFrame %6i (%s) aligned in %8.2f sec, (sx, sy) = (%8i,%8i)." %(i, file_lst[i], time.time()-tst, s1, s2))
     
@@ -342,30 +333,17 @@ def parse_offsets(out_list):
 # Weights and covariance computation
 ##############################################################
 def compute_weights(frames_working):
-    # read the alignment results of multiple processes
+    # compute the covariance matrix (note that the mean value of the frame was
+    # already removed)
     tst = time.time()
-    for i in range(n_files):
-        frame = np.fromfile(file_swp[i], dtype=raw_data_type)
-        frames_working[i,:,:] = frame.reshape(n1, n2)
-
-    print("Computing weights... Aligned frames read in, time cost:   %9.2f" %(time.time()-tst)); tst = time.time()
-
-    # remove the mean value from each frame
-    tst = time.time()
-    for i in range(0, n_files):
-        frames_working[i,:,:] = frames_working[i,:,:] - np.mean(frames_working[i,:,:])
-    print("Computing weights... mean removed from frames, time cost: %9.2f" %(time.time()-tst)); tst = time.time()
-    
-    # compute the covariance matrix
-    tst = time.time()
-    frames_working = frames_working.reshape(n_files, n1*n2)
-    cov = np.dot(frames_working, frames_working.transpose())
-    print("Computing weights... cov-matrix obtained, time cost:      %9.2f" %(time.time()-tst)); tst = time.time()
+    buff = frames_working.reshape(n_files, n1*n2)
+    cov = np.dot( buff, buff.transpose() )
 
     # compute weights from the covariance matrix
     w = np.zeros(n_files)
     for i in range(n_files):
         w[i] = np.sum(cov[i,:])/cov[i,i] - 1
+    print("Computing weights... done, time cost:                     %9.2f" %(time.time()-tst)); tst = time.time()
 
     return w
 
@@ -494,11 +472,7 @@ def normalize_frame(frame, vmin, vmax):
     frame_norm[:,1,:,1] = rescale_array(frame_norm[:,1,:,1], vmin, vmax)
     return frame_norm.reshape(n1, n2)
     
-    
-    
-    
 
-    
 
 
 ##############################################################
@@ -514,7 +488,7 @@ def normalize_frame(frame, vmin, vmax):
 ##############################################################
 # Initialization
 ##############################################################
-tst = time.time()
+tst_tot = time.time()
 if console == True:
     # in console mode, do not produce online images (but will save pdf)
     matplotlib.use('Agg')
@@ -530,7 +504,7 @@ if console == True:
 else:
     # Improve the display effect of Jupyter notebook
     from IPython.core.display import display, HTML
-    display(HTML("<style>.container { width:95% !important; }</style>"))
+    display(HTML("<style>.container { width:100% !important; }</style>"))
 
 # check the color type
 if align_color_mode!="color" and align_color_mode!="mono":
@@ -550,74 +524,109 @@ fullpath = os.path.abspath("./")
 if not os.path.isdir(output_dir):
     os.mkdir(output_dir)
 
-file_lst, file_swp = [], []
-for file in os.listdir():
-    if file.endswith(extension):
-        file_lst.append(file)
+smm = SharedMemoryManager()
+smm.start()
 
-# sort the file list and then build auxiliary file lists accordingly
-file_lst.sort()
-for file in file_lst:
-    file_swp.append(os.path.splitext(file)[0] + '.swp')
+if __name__ == '__main__':
+    # list input files, sort and build auxiliary file list accordingly
+    list1 = []
+    for file in os.listdir():
+        if file.endswith(extension):
+            list1.append(file)
+    list1.sort()
+    file_lst = smm.ShareableList(list1)
 
-n_files = np.int64(len(file_lst))
-if n_files<2:
-    print("Too few files, check the dir/file name or extension?")
-    print("Usage: python stack.py dir_of_inputs file_extension number_of_cores")
-    print("or (on cluster): sbatch file_of_sbash_script stack.py dir_of_inputs file_extension number_of_cores")
-    sys.exit()
+    if len(file_lst) < 2:
+        print("Too few files, check the dir/file name or extension?")
+        print("Usage: python stack.py dir_of_inputs file_extension number_of_cores")
+        print("or (on cluster): sbatch file_of_sbash_script stack.py dir_of_inputs file_extension number_of_cores")
+        sys.exit()
+
+    list1 = []
+    for file in file_lst:
+        list1.append(os.path.splitext(file)[0] + '.swp')    
+    file_swp = smm.ShareableList(list1)
+
+n_files = len(file_lst)
 
 if nproc_max > n_files:
     nproc = n_files
 else:
     nproc = nproc_max
 
-# use the first file as the initial reference file
-if mode=="fits":
-    frame, _, raw_data_type = read_frame_fits(file_lst[0]) 
-else:
-    frame, _, raw_data_type = read_frame_raw(file_lst[0]) 
+# use the first file as the initial reference file and get size, type
+# information
+if __name__ == '__main__':
+    if mode=="fits":
+        frame, _, cache = read_frame_fits(file_lst[0]) 
+    else:
+        frame, _, cache = read_frame_raw(file_lst[0]) 
+    info_lst = smm.ShareableList([cache, np.shape(frame)[0], np.shape(frame)[1]])
 
-n1 = np.int64(np.shape(frame)[0])
-n2 = np.int64(np.shape(frame)[1])
+raw_data_type, n1, n2 = info_lst[0], info_lst[1], info_lst[2]
+
 if align_color_mode=='color':
-    n1s = np.int64(n1/2)
-    n2s = np.int64(n2/2)
+    n1s = int(n1/2)
+    n2s = int(n2/2)
 else:
     n1s = n1
     n2s = n2
 
-# make the 2D-tukey window
-w1 = tukey(n1s, alpha=align_tukey_alpha).reshape(n1s, 1)
-w2 = tukey(n2s, alpha=align_tukey_alpha).reshape(1, n2s)
-win = np.dot(w1, w2)
+f1s, f2s = n1s, n2s//2 + 1
 
-# make a low-pass window in the Fourier domain
-freq = rfft2_freq(n1s, n2s)
-fs = freq.shape
-fs1, fs2 = fs[0], fs[1]
-mask_hp = np.where(freq<align_hp_ratio, 0, 1)
+# make and share window function, highpass mask.
+if __name__ == '__main__':
+    shm_win = smm.SharedMemory(n1s*n2s*working_precision.itemsize)
+    shm_mask_hp = smm.SharedMemory(f1s*f2s*working_precision.itemsize)
 
-print("Initialization done, time cost:                           %9.2f" %(time.time()-tst))
+    # make the 2D-tukey window
+    buff = np.frombuffer(shm_win.buf, dtype=working_precision).reshape(n1s, n2s)
+    w1 = tukey(n1s, alpha=align_tukey_alpha).reshape(n1s, 1)
+    w2 = tukey(n2s, alpha=align_tukey_alpha).reshape(1, n2s)
+    buff[:,:] = np.dot(w1, w2)
 
+    freq = rfft2_freq(n1s, n2s)
+    buff = np.frombuffer(shm_mask_hp.buf, dtype=working_precision).reshape(f1s, f2s)
+    buff[:,:] = np.where(freq<align_hp_ratio, 0, 1)
 
+    if align_color_mode=="color":
+        ref_fft_size = 4*f1s*f2s*working_precision_complex.itemsize
+    else:
+        ref_fft_size = f1s*f2s*working_precision_complex.itemsize
+    shm_ref_fft = smm.SharedMemory(ref_fft_size)
 
-##############################################################
-# read the frames by main
-##############################################################
+    buff = None
+
+win = np.frombuffer(shm_win.buf, dtype=working_precision).reshape(n1s, n2s)
+mask_hp = np.frombuffer(shm_mask_hp.buf, dtype=working_precision).reshape(f1s, f2s)
+if align_color_mode=="color":
+    ref_fft = np.frombuffer(shm_ref_fft.buf, dtype=working_precision_complex).reshape(f1s, 2, f2s, 2)
+else:
+    ref_fft = np.frombuffer(shm_ref_fft.buf, dtype=working_precision_complex).reshape(f1s, f2s)
+
+# make and share the array of all frames
 if __name__ == '__main__':
     # read frames, save the observation times, and compute the local
     # horizontal reference frames accordingly
     tst = time.time()
-    datetime = []
+    shm_frames = smm.SharedMemory(np.int64(n_files)*np.int64(n1)*np.int64(n2)*working_precision.itemsize)
+    buff = np.frombuffer(shm_frames.buf, dtype=working_precision).reshape(n_files, n1, n2)
+    list1 = []
+    
     for i in range(n_files):
         if mode=="fits":
             frame, datet, _ = read_frame_fits(file_lst[i])
         elif mode=="raw":
             frame, datet, _ = read_frame_raw(file_lst[i])
-        frame.tofile(file_swp[i])
-        datetime.append(datet)
+        buff[i,:,:] = frame
+        list1.append(datet)
+    datetime = smm.ShareableList(list1)
+    buff = None
     print("Frames read and cached by the main proc, time cost:       %9.2f" %(time.time()-tst))
+
+frames_working = np.frombuffer(shm_frames.buf, dtype=working_precision).reshape(n_files, n1, n2)
+
+print("Initialization done, time cost:                           %9.2f" %(time.time()-tst_tot))
 
 
 
@@ -674,10 +683,8 @@ if align_fix_ratation==True:
 ##############################################################
 # Alignment (multi-processes)
 ##############################################################
-ref_fft = np.zeros([fs1, fs2], dtype=working_precision_complex)
 if __name__ == '__main__':
     wid, sx, sy = 0, [], []
-    frames_working = np.zeros([n_files, n1, n2], dtype=working_precision)
 
     tst_tot = time.time()
     for nar in range(align_rounds):
@@ -687,15 +694,10 @@ if __name__ == '__main__':
 
         # compute the reference frame fft by the main process
         tst = time.time()
-        ref_frame = np.fromfile(file_swp[wid], dtype=raw_data_type).reshape(n1, n2)
-        ref_fft = np.conjugate( frame2fft(ref_frame) )
-        ref_fft.tofile(file_ref_fft)
-
-        # read the reference frame fft into sub-processes
-        wlist = []
-        for i in range(n_files): wlist.append(wid)
-        with mp.Pool(nproc) as pool:
-            output = pool.map(make_ref_fft, wlist)
+        if align_color_mode=="color":
+            ref_fft[:,:] = np.conjugate( frame2fft(frames_working[wid,:,:]) )
+        else:
+            ref_fft[:,:] = np.conjugate( frame2fft(frames_working[wid,:,:]) )
 
         with mp.Pool(nproc) as pool:
             output = pool.map(align_frames, range(n_files))
@@ -740,12 +742,6 @@ if __name__ == '__main__':
     print("Stacked frame get from %4i/%4i best frames, time cost:    %9.2f" 
         %(n_files-n_bad, n_files, time.time()-tst))
 
-    # clear swap files
-    for file in file_swp:
-        os.remove(file)
-
-    os.remove(file_ref_fft)
-
     # plot the XY-shifts
     w_mask = np.where(w==0, np.nan, 1)
 
@@ -761,10 +757,10 @@ if __name__ == '__main__':
             plt.scatter(sy[-2][:,2]*w_mask, sx[-2][:,2]*w_mask, s=30, c='g', alpha=0.5, label='Round 1, Bayer-10')
             plt.scatter(sy[-2][:,3]*w_mask, sx[-2][:,3]*w_mask, s=10, c='b', alpha=0.5, label='Round 1, Bayer-11')
         
-        plt.scatter(sy[-1][:,0]*w_mask, sx[-1][:,0]*w_mask, s=50, c='k', alpha=0.5, label='Round 2, Bayer-00')
-        plt.scatter(sy[-1][:,1]*w_mask, sx[-1][:,1]*w_mask, s=50, c='k', alpha=0.5, label='Round 2, Bayer-01')
-        plt.scatter(sy[-1][:,2]*w_mask, sx[-1][:,2]*w_mask, s=50, c='k', alpha=0.5, label='Round 2, Bayer-10')
-        plt.scatter(sy[-1][:,3]*w_mask, sx[-1][:,3]*w_mask, s=50, c='k', alpha=0.5, label='Round 2, Bayer-11')
+        plt.scatter(sy[-1][:,0]*w_mask, sx[-1][:,0]*w_mask, s=10, c='k', alpha=0.5, label='Round 2, Bayer-00')
+        plt.scatter(sy[-1][:,1]*w_mask, sx[-1][:,1]*w_mask, s=10, c='k', alpha=0.5, label='Round 2, Bayer-01')
+        plt.scatter(sy[-1][:,2]*w_mask, sx[-1][:,2]*w_mask, s=10, c='k', alpha=0.5, label='Round 2, Bayer-10')
+        plt.scatter(sy[-1][:,3]*w_mask, sx[-1][:,3]*w_mask, s=10, c='k', alpha=0.5, label='Round 2, Bayer-11')
     else:
         TT = np.arange(n_files)
         if nar>0:
@@ -789,6 +785,7 @@ if __name__ == '__main__':
 
     print("Done!")
 
+smm.shutdown()
 
 
 
