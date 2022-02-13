@@ -289,7 +289,7 @@ def align_frames(i):
             for kk in range(2):
                 # fix the offset for one Bayer component and save into the result array
                 frame[:,jj,:,kk] = np.roll( frame[:,jj,:,kk].reshape(n1s, n2s), 
-                    (s1[jj,kk], s2[jj,kk]), axis=(0,1) )
+                    (s1[jj,kk], s2[jj,kk]), axis=(0,1) ) - np.mean(frame[:,jj,:,kk])
     else:
         # compute the frame offset
         fft_comb = (ref_fft*frame_fft*mask_hp).astype(working_precision_complex)
@@ -304,10 +304,10 @@ def align_frames(i):
         # apply the offset correction
         s1 = np.round(periodical_norm(s1, n1)).astype(np.int32)
         s2 = np.round(periodical_norm(s2, n2)).astype(np.int32)
-        frame = np.roll( frame, (s1, s2), axis=(0,1) )
+        frame = np.roll( frame, (s1, s2), axis=(0,1) ) - np.mean(frame)
 
     # save the aligned binaries (without mean)
-    frames_working[i,:,:] = frame.reshape(n1, n2) - np.mean(frame)
+    frames_working[i,:,:] = frame.reshape(n1, n2)
 
     if align_report==True:
         print("\nFrame %6i (%s) aligned in %8.2f sec, (sx, sy) = (%8i,%8i)." %(i, file_lst[i], time.time()-tst, s1, s2))
