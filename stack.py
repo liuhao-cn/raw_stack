@@ -9,7 +9,7 @@
 ##############################################################
 # Imports
 ##############################################################
-import os, cv2, time, rawpy, sys, matplotlib
+import os, time, rawpy, sys, matplotlib
 
 import numpy as np
 import multiprocessing as mp
@@ -207,8 +207,8 @@ def rfft2_freq(n1, n2):
 # 1. A Tukey window to suppress the edge effect.
 #
 # 2. A pre-process before the matched filtering, including a Gaussian
-#    filtering (smoothing) to suppress the abnormally high CMOS noise peak,
-#    which could corrupt the matched filtering.
+#    filtering (smoothing) to suppress the abnormally high and non-Gaussian
+#    CMOS noise peaks, which could corrupt the matched filtering.
 #
 # 3. Explicit control of the precision to save memory.
 #
@@ -490,7 +490,8 @@ def normalize_frame(frame, vmin, vmax):
 ##############################################################
 tst_tot = time.time()
 if console == True:
-    # in console mode, do not produce online images (but will save pdf)
+    # In console mode, do not produce online images (but will save pdf
+    # instead)
     matplotlib.use('Agg')
     if len(sys.argv)==4:
         working_dir = sys.argv[1]
@@ -502,7 +503,7 @@ if console == True:
         print("Input file extension:      %s" %(extension))
         print("Number of processes limit: %s" %(nproc_max))
 else:
-    # Improve the display effect of Jupyter notebook
+    # In non-console mode, improve the display effect of Jupyter notebook
     from IPython.core.display import display, HTML
     display(HTML("<style>.container { width:100% !important; }</style>"))
 
@@ -524,6 +525,7 @@ fullpath = os.path.abspath("./")
 if not os.path.isdir(output_dir):
     os.mkdir(output_dir)
 
+# start the shared memory manager
 smm = SharedMemoryManager()
 smm.start()
 
@@ -739,7 +741,7 @@ if __name__ == '__main__':
     file_stacked = os.path.join(fullpath,output_dir,final_file_fits)
     write_fits_simple([frame_stacked.astype(raw_data_type)], file_stacked, overwrite=True)
 
-    print("Stacked frame get from %4i/%4i best frames, time cost:    %9.2f" 
+    print("Stacked frame obtained from %4i/%4i frames, time cost.    %9.2f" 
         %(n_files-n_bad, n_files, time.time()-tst))
 
     # plot the XY-shifts
