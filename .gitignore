@@ -4,3 +4,4 @@ raw_stack_mpi.py
 mpi_raw_stack.py
 raw_stack_mpi.py
 fits_stack_tmp.py
+obsolete/test_fftw.py
