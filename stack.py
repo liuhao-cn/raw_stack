@@ -33,17 +33,27 @@ from multiprocessing.managers import SharedMemoryManager
 ##############################################################
 # longitude, latitude, height and time zone of the AHU observatory to define
 # the location object of the AHU observatory
-ahu_lon = 117.21  # needs to be updated
-ahu_lat = 31.84   # needs to be updated
-ahu_alt = 63.00   # needs to be updated
-ahu_zone = +8
-ahu_site = EarthLocation(lon=ahu_lon*u.deg, lat=ahu_lat*u.deg, height=ahu_alt*u.m)
+site_lon = 117.181  # longitude (east) of the AHU observatory
+site_lat =  31.772  # latitude (north) of the AHU observatory
+site_alt =  43.00   # altitude of the AHU observatory
+time_zone = +8      # time zone of the site 
+obs_site = EarthLocation(lon=site_lon*u.deg, lat=site_lat*u.deg, height=site_alt*u.m)
 
 # Define observation target, either in name or in ra-dec.
 # in name, use (for example): target = SkyCoord.from_name("m31"); 
 # in ra-dec, use (for example): target = SkyCoord(ra=45*u.deg, dec=45*u.deg)
+# For example: 
+# # M42 by ra-dec: 
 target = SkyCoord(ra=83.82208333*u.deg, dec=-5.39111111*u.deg)
+# # M31 by ra-dec: 
+# target = SkyCoord(ra=10.684793*u.deg, dec=41.269065*u.deg)
+# # Barnard 33 by ra-dec: 
+# target = SkyCoord(ra=85.24583333*u.deg, dec=-2.45833333*u.deg)
+
+# # M42 by name (reqires internet connection)
 # target = SkyCoord.from_name("m42")
+# # M31 by name (reqires internet connection)
+# target = SkyCoord.from_name("m31")
 
 # If true, work in console mode, will not process the Jupyter notebook code
 # and will not produce online images.
@@ -59,7 +69,7 @@ nproc_max = int(mp.cpu_count()/2)
 ##############################################################
 # Working directory, all raw or fits files should be in this directory. 
 # Will be overwritten by the command-line parameter.
-working_dir = "/work/astro/m42"
+working_dir = "/work/astro/"
 
 # Define the input file extension. All files in the working directory with
 # this extension will be used. If this is fits or fit, work in fits mode
@@ -100,14 +110,18 @@ align_tukey_alpha = 0.2
 # sigma of Gaussian filtering (smoothing), only for alignment.
 align_gauss_sigma = 8
 
-# rounds of alignment. In each round a new (better) reference frame is chosen.
-# 3 is usually fine.
-align_rounds = 3
+# rounds of alignment. In each round a new (better) reference frame is
+# chosen. 4 is usually more than enough.
+align_rounds = 4
 
 # Specify whether or not to fix the field rotation (requires the observation
 # time, target and site locations). For an Alt-az mount, this is necessary,
 # but for an equatorial mount this is unnecessary.
-align_fix_ratation = False
+align_fix_ratation = True
+
+# Specify whether or not the original observation time is already in UTC. If
+# this is False, then a time zone correction will be applied.
+align_time_already_utc = True
 
 # If true, do not report the alignment result
 align_report = False
@@ -145,7 +159,7 @@ final_file_fits = "frame_stacked.fits"
 
 ##############################################################
 # Fits related routines:
-##############################################################
+    
 # read fits or raw file and convert to bin so it can be used by
 # multiprocessing returns: frame, time, date type
 def read_frame_fits(file):
@@ -424,25 +438,21 @@ def compute_field_rot(target, hor_ref_frame, debug=False):
 
 # note: need to check if we should multiply -1 to angle. 
 # note: the four Bayer blocks are rotated separately so as not to corrupt the Bayer matrix.
-def fix_rotation(file, angle, raw_data_type, n1, n2):
-    frame = np.fromfile(file, dtype=raw_data_type).reshape(n1s, 2, n2s, 2)
-    frame00 = frame[:,0,:,0].reshape(n1s, n2s)
-    frame01 = frame[:,0,:,1].reshape(n1s, n2s)
-    frame10 = frame[:,1,:,0].reshape(n1s, n2s)
-    frame11 = frame[:,1,:,1].reshape(n1s, n2s)
-    frame00 = ndimage.rotate(frame00, angle, reshape=False)
-    frame01 = ndimage.rotate(frame01, angle, reshape=False)
-    frame10 = ndimage.rotate(frame10, angle, reshape=False)
-    frame11 = ndimage.rotate(frame11, angle, reshape=False)
-    frame00 = np.where(frame00==0, np.median(frame00), frame00)
-    frame01 = np.where(frame01==0, np.median(frame01), frame01)
-    frame10 = np.where(frame10==0, np.median(frame10), frame10)
-    frame11 = np.where(frame11==0, np.median(frame11), frame11)
-    frame[:,0,:,0] = frame00
-    frame[:,0,:,1] = frame01
-    frame[:,1,:,0] = frame10
-    frame[:,1,:,1] = frame11
-    frame.tofile(file)
+def fix_rotation(i):
+    if align_color_mode=="color":
+        frame = frames_working[i,:,:].reshape(n1s, 2, n2s, 2)
+        for j in range(2):
+            for k in range(2):
+                frame1 = frame[:,j,:,k].reshape(n1s, n2s)
+                frame1 = ndimage.rotate(frame1, -rot_ang[i], reshape=False)
+                frame1 = np.where(frame1==0, np.median(frame1), frame1)
+                frame[:,j,:,k] = frame1
+    else:
+        frame = frames_working[i,:,:].reshape(n1, n2)
+        frame = ndimage.rotate(frame, -rot_ang[i], reshape=False)
+        frame = np.where(frame==0, np.median(frame), frame)
+    
+    frames_working[i,:,:] = frame.reshape(n1, n2)
 
 
 
@@ -512,12 +522,14 @@ if align_color_mode!="color" and align_color_mode!="mono":
     print("Error! The color type has to be color or mono!")
     sys.exit()
 
-# determine the working mode, only fits allows field rotation correction
+# determine the working mode, currently only fits allows field rotation
+# correction
 if extension=="fits" or extension=='fit':
     mode = "fits"
 else:
     mode = "raw"
     align_fix_ratation = False
+    align_time_already_utc = False
 
 # make a list of working files and determine the number of processes to be used
 os.chdir(working_dir)
@@ -628,6 +640,13 @@ if __name__ == '__main__':
 
 frames_working = np.frombuffer(shm_frames.buf, dtype=working_precision).reshape(n_files, n1, n2)
 
+# make and share arrays of field rotation
+if __name__ == '__main__' and align_fix_ratation==True:
+    shm_rot_ang = smm.SharedMemory(n_files*working_precision.itemsize)
+
+if align_fix_ratation==True:
+    rot_ang = np.frombuffer(shm_rot_ang.buf, dtype=working_precision).reshape(n_files)
+
 print("Initialization done, time cost:                           %9.2f" %(time.time()-tst_tot))
 
 
@@ -637,18 +656,21 @@ print("Initialization done, time cost:                           %9.2f" %(time.t
 ##############################################################
 if __name__ == '__main__' and align_fix_ratation==True:
     tst = time.time()
-    obstime_list = astro_time(datetime) - ahu_zone*u.hour
-    hor_ref_frame = AltAz(obstime=obstime_list, location=ahu_site)
+    if align_time_already_utc==False:
+        time_shift = time_zone*u.hour
+    else:
+        time_shift = 0*u.hour
+    obstime_list = astro_time(datetime) - time_shift
+    hor_ref_frame = AltAz(obstime=obstime_list, location=obs_site)
 
-    # compute the reletive time in seconds, and subtract the median value to minimize the rotations
+    # compute the relative time in seconds, and subtract the median
+    # value to minimize the rotations
     rel_sec = (obstime_list - obstime_list[0]).to_value(format='sec')
     rel_sec = rel_sec - np.median(rel_sec)
     
     # compute the absolute field rotation angles as "rot_ang"
     rot_ang = compute_field_rot(target, hor_ref_frame)
     rot_ang = rot_ang - np.median(rot_ang)
-    file = os.path.join(fullpath,outputdir,file_rot_ang)
-    rot_ang.astype(working_precision).tofile(file)
     print("Rotation angles computed, time cost:                      %9.2f" %(time.time()-tst))
 
     # plot the field rotation angle for test 
@@ -657,28 +679,28 @@ if __name__ == '__main__' and align_fix_ratation==True:
     plt.xlabel('Time (sec)', fontsize=9)
     plt.ylabel('Angle', fontsize=9)
     plt.plot(rel_sec, rot_ang, marker="o")
-    plt.savefig('field_rot_angle.pdf')
+    plt.savefig(os.path.join(fullpath,output_dir,'field_rot_ang.pdf'))
 
     # fix the field rotation (multi-processes)
     tst = time.time()
-    p1, p2, p3, p4, p5 = [], [], [], [], []
-    for i in range(n_files):
-        p1.append(file_swp[i])
-        p2.append(rot_ang[i])
-        p3.append(raw_data_type)
-        p4.append(n1)
-        p5.append(n2)
+    # p1, p2, p3, p4, p5 = [], [], [], [], []
+    # for i in range(n_files):
+    #     p1.append(file_swp[i])
+    #     p2.append(rot_ang[i])
+    #     p3.append(raw_data_type)
+    #     p4.append(n1)
+    #     p5.append(n2)
     with mp.Pool(nproc) as pool:
-        output = [pool.starmap(fix_rotation, zip(p1, p2, p3, p4, p5))]
+        output = [pool.map(fix_rotation, range(n_files))]
     print("Field rotation fixed, time cost:                          %9.2f" %(time.time()-tst) )
 
 # For all processes: if fix-rotation is required, then read rot_ang from file
 # and reset the reference frame to the one with least rotation (frame already
 # fixed)
 if align_fix_ratation==True:
-    file = os.path.join(fullpath,output_dir,file_rot_ang)
-    rot_ang = np.fromfile(file, dtype=working_precision)
     wid = np.argmin(np.abs(rot_ang))
+else:
+    wid = 0
 
 
 
@@ -686,7 +708,7 @@ if align_fix_ratation==True:
 # Alignment (multi-processes)
 ##############################################################
 if __name__ == '__main__':
-    wid, sx, sy = 0, [], []
+    sx, sy = [], []
 
     tst_tot = time.time()
     for nar in range(align_rounds):
