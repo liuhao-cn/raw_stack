@@ -12,6 +12,7 @@
 import os, time, rawpy, sys, matplotlib
 
 import numpy as np
+import pandas as pd
 import multiprocessing as mp
 import matplotlib.pyplot as plt
 import heapq as hp
@@ -28,132 +29,111 @@ from astropy.time import TimezoneInfo
 from multiprocessing.managers import SharedMemoryManager
 
 
-##############################################################
-# Site and observation targets
-##############################################################
-# longitude, latitude, height and time zone of the AHU observatory to define
-# the location object of the AHU observatory
-site_lon = 117.181  # longitude (east) of the AHU observatory
-site_lat =  31.772  # latitude (north) of the AHU observatory
-site_alt =  43.00   # altitude of the AHU observatory
-time_zone = +8      # time zone of the site 
-obs_site = EarthLocation(lon=site_lon*u.deg, lat=site_lat*u.deg, height=site_alt*u.m)
+# read in parameters from the excel form
+df = pd.read_excel("stack_params.xlsx")
 
-# Define observation target, either in name or in ra-dec.
-# in name, use (for example): target = SkyCoord.from_name("m31"); 
-# in ra-dec, use (for example): target = SkyCoord(ra=45*u.deg, dec=45*u.deg)
-# For example: 
-# # M42 by ra-dec: 
-target = SkyCoord(ra=83.82208333*u.deg, dec=-5.39111111*u.deg)
-# # M31 by ra-dec: 
-# target = SkyCoord(ra=10.684793*u.deg, dec=41.269065*u.deg)
-# # Barnard 33 by ra-dec: 
-# target = SkyCoord(ra=85.24583333*u.deg, dec=-2.45833333*u.deg)
+# longitude, latitude, altitude and time zone of the observatory
+site_lon     = float(df[2][1])
+site_lat     = float(df[2][2])
+site_alt     = float(df[2][3])
+tzone        =   int(df[2][4])
 
-# # M42 by name (reqires internet connection)
-# target = SkyCoord.from_name("m42")
-# # M31 by name (reqires internet connection)
-# target = SkyCoord.from_name("m31")
+# (ra, dec) of the observation target
+ra           = float(df[5][1])
+dec          = float(df[5][2])
 
-# If true, work in console mode, will not process the Jupyter notebook code
-# and will not produce online images.
-console = True
-
-# Define the maximum number of processes to be used. Will be overwritten by
-# the command-line parameter.
-nproc_max = int(mp.cpu_count()/2)
-
-
-##############################################################
-# Input file and folder parameters
-##############################################################
-# Working directory, all raw or fits files should be in this directory. 
-# Will be overwritten by the command-line parameter.
-working_dir = "/work/astro/"
-
-# Define the input file extension. All files in the working directory with
-# this extension will be used. If this is fits or fit, work in fits mode
-# (usually for an astro-camera), otherwise work in raw mode (usually for a
-# DSLR). Will be overwritten by the command-line parameter.
-extension = "fit"
-
-# Fraction of frames that will not be used
-bad_fraction = 0.2
-
-# Page number of data in the fits file
-page_num = 0
-
-# Tag in fits file for the obs. date and time information
-date_tag = 'DATE-OBS'
-
-output_dir = "output"
-
-
-##############################################################
 # Alignment parameters
-##############################################################
-# Camera color type for alignment. "color" means RGB (in form of Bayer
-# components) are aligned separately, which will automatically correct the
-# color dispersion due to atmosphere refraction. "mono" means the entire frame
-# is aligned as one, which is much better for a low signal-to-noise ratio.
-align_color_mode = "color"
+#
+# align_color_mode: Camera color type for alignment. "color" means RGB
+# (in form of Bayer components) are aligned separately, which will
+# automatically correct the color dispersion due to atmosphere
+# refraction. "mono" means the entire frame is aligned as one, which is
+# much better for a low signal-to-noise ratio.
+#
+# align_hp_ratio: 2D High-pass cut frequency as a fraction of the
+# Nyquist frequency. Only for alignment to reduce background impacts.
+# Will not affect the actual frames.
+#
+# align_tukey_alpha: Tukey window alpha parameter to improve the matched
+# filtering. For example, 0.04 means 2% at each edge (left, right, top,
+# bottom) is suppressed. Note that this should match the maximum shifts
+#
+# align_gauss_sigma: sigma of Gaussian filtering (smoothing), only for
+# alignment.
+#
+# align_rounds: rounds of alignment. In each round a new (better)
+# reference frame is chosen. 4 is usually more than enough.
+#
+# align_fix_ratation: Specify whether or not to fix the field rotation
+# (requires the observation time, target and site locations). For an
+# Alt-az mount, this is necessary, but for an equatorial mount this is
+# unnecessary.
+#
+# align_time_is_utc: Specify whether or not the original observation
+# time is already in UTC. If this is False, then a time zone correction
+# will be applied.
+#
+# align_report: If true, do not report the alignment result
+#
+align_color_mode    =   str(df[5][ 6])
+align_hp_ratio      = float(df[5][ 7])
+align_tukey_alpha   = float(df[5][ 8])
+align_gauss_sigma   = float(df[5][ 9])
+align_rounds        =   int(df[5][10])
+align_fix_ratation  = (df[5][11].lower() == "true")
+align_time_is_utc   = (df[5][12].lower() == "true")
+align_report        = (df[5][13].lower() == "true")
 
-# 2D High-pass cut frequency as a fraction of the Nyquist frequency. Only for
-# alignment to reduce background impacts. Will not affect the actual frames.
-align_hp_ratio = 0.01
+# File and folder parameters
+#
+# working_dir: Working directory, all raw or fits files should be in
+# this directory. Will be overwritten by the command-line parameter.
+#
+# extension: Define the input file extension. All files in the working
+# directory with this extension will be used. If this is fits or fit,
+# work in fits mode (usually for an astro-camera), otherwise work in raw
+# mode (usually for a DSLR). Will be overwritten by the command-line
+# parameter.
+#
+# bad_fraction: Fraction of frames that will not be used
+#
+# page_num: Page number of data in the fits file
+#
+# date_tag: Tag in fits file for the obs. date and time information
+#
+# output_dir: output directory
+#
+working_dir  =   str(df[2][7])
+extension    =   str(df[2][8])
+bad_fraction = float(df[2][9])
+page_num     =   int(df[2][10])
+date_tag     =   str(df[2][11])
+output_dir   =   str(df[2][12])
 
-# Tukey window alpha parameter to improve the matched filtering. For example,
-# 0.04 means 2% at each edge (left, right, top, bottom) is suppressed. Note
-# that this should match the maximum shifts
-align_tukey_alpha = 0.2
+# working precision for real and complex numbers
+working_precision         = np.dtype(df[5][16])
+working_precision_complex = np.dtype(df[5][17])
 
-# sigma of Gaussian filtering (smoothing), only for alignment.
-align_gauss_sigma = 8
-
-# rounds of alignment. In each round a new (better) reference frame is
-# chosen. 4 is usually more than enough.
-align_rounds = 4
-
-# Specify whether or not to fix the field rotation (requires the observation
-# time, target and site locations). For an Alt-az mount, this is necessary,
-# but for an equatorial mount this is unnecessary.
-align_fix_ratation = True
-
-# Specify whether or not the original observation time is already in UTC. If
-# this is False, then a time zone correction will be applied.
-align_time_already_utc = True
-
-# If true, do not report the alignment result
-align_report = False
+# other parameters. 
+# 
+# console: If true, work in console mode, no online figures.
+#
+# adc_digit_limit: upper limit for the ADC digit, should usually be 16.
+#
+# final_file_fits: the final output file.
+#
+console         = (df[2][15].lower() == "true")
+adc_digit_limit = int(df[2][16])
+final_file_fits = str(df[2][17])
 
 
-##############################################################
-# Precision settings
-##############################################################
-# Working precision takes effect in FFT and matrix multiplication
-working_precision = np.dtype("float32")
-
-# Working precision takes effect in FFT and matrix multiplication
-working_precision_complex = np.dtype("complex64")
-
-
-##############################################################
-# Other parameters
-##############################################################
-# Number of ADC digit. The maximum value should be 2**adc_digit-1. This should
-# usualLy be 16, even when the actual digit is less, e.g., 12 or 14 bits.
-adc_digit_limit = 16
-
+obs_site = EarthLocation(lon=site_lon*u.deg, lat=site_lat*u.deg, height=site_alt*u.m)
+# or by name, like target = SkyCoord.from_name("m42")
+target = SkyCoord(ra=ra*u.deg, dec=dec*u.deg)
+# The maximum number of processes, overwritten by the command-line input
+nproc_max = int(mp.cpu_count()/2)
+# raw data maximum value
 vmax_global = 2**adc_digit_limit - 1
-
-# field rotation ang file
-file_rot_ang = "field_rot_ang.bin"
-
-# Name of the final image
-final_file_tif = "final.tiff"
-
-# Name of the final fits
-final_file_fits = "frame_stacked.fits"
 
 
 
@@ -508,7 +488,7 @@ if console == True:
         extension = sys.argv[2]
         nproc_max = int(sys.argv[3])
     else:
-        print("Warning: command-line parameters less than 3, will use the default ones instead:")
+        print("Warning: command-line parameters less than 3, will use the ones in the parameter file:")
         print("Working directory:         %s" %(working_dir))
         print("Input file extension:      %s" %(extension))
         print("Number of processes limit: %s" %(nproc_max))
@@ -529,7 +509,7 @@ if extension=="fits" or extension=='fit':
 else:
     mode = "raw"
     align_fix_ratation = False
-    align_time_already_utc = False
+    align_time_is_utc = False
 
 # make a list of working files and determine the number of processes to be used
 os.chdir(working_dir)
@@ -656,8 +636,8 @@ print("Initialization done, time cost:                           %9.2f" %(time.t
 ##############################################################
 if __name__ == '__main__' and align_fix_ratation==True:
     tst = time.time()
-    if align_time_already_utc==False:
-        time_shift = time_zone*u.hour
+    if align_time_is_utc==False:
+        time_shift = tzone*u.hour
     else:
         time_shift = 0*u.hour
     obstime_list = astro_time(datetime) - time_shift
@@ -831,99 +811,182 @@ smm.shutdown()
 
 
 
-# # manually adjust the rgb range
-# def adjust_color_manual(rgb, rgb_min, rgb_max, rgb_gamma):
-#     global_max = vmax_global
-#     r = rescale_array(rgb[:,:,0], rgb_min[0], rgb_max[0])
-#     g = rescale_array(rgb[:,:,1], rgb_min[1], rgb_max[1])
-#     b = rescale_array(rgb[:,:,2], rgb_min[2], rgb_max[2])
-#     r = (r**rgb_gamma[0])*global_max
-#     g = (g**rgb_gamma[1])*global_max
-#     b = (b**rgb_gamma[2])*global_max
-#     rgb_adjusted = rgb*0
-#     rgb_adjusted[:,:,0] = r
-#     rgb_adjusted[:,:,1] = g
-#     rgb_adjusted[:,:,2] = b
-#     return rgb_adjusted
+# # # manually adjust the rgb range
+# # def adjust_color_manual(rgb, rgb_min, rgb_max, rgb_gamma):
+# #     global_max = vmax_global
+# #     r = rescale_array(rgb[:,:,0], rgb_min[0], rgb_max[0])
+# #     g = rescale_array(rgb[:,:,1], rgb_min[1], rgb_max[1])
+# #     b = rescale_array(rgb[:,:,2], rgb_min[2], rgb_max[2])
+# #     r = (r**rgb_gamma[0])*global_max
+# #     g = (g**rgb_gamma[1])*global_max
+# #     b = (b**rgb_gamma[2])*global_max
+# #     rgb_adjusted = rgb*0
+# #     rgb_adjusted[:,:,0] = r
+# #     rgb_adjusted[:,:,1] = g
+# #     rgb_adjusted[:,:,2] = b
+# #     return rgb_adjusted
 
 
-    # tst = time.time()
-    # # stacked frame to linear rgb value (handle the Bayer matrix)
-    # rgb = frame2rgb_fits(frame_stacked)
+#     # tst = time.time()
+#     # # stacked frame to linear rgb value (handle the Bayer matrix)
+#     # rgb = frame2rgb_fits(frame_stacked)
 
-    # rgb_modified, cdf = color_correction(rgb, rgb_gamma, rgb_max=rgb_max, bins=32000)
+#     # rgb_modified, cdf = color_correction(rgb, rgb_gamma, rgb_max=rgb_max, bins=32000)
 
-    # # save the 48-bit color image
-    # imageio.imsave(os.path.join(working_dir,output_dir,final_file_tif), 
-    #     rgb_modified.astype(raw_data_type))
+#     # # save the 48-bit color image
+#     # imageio.imsave(os.path.join(working_dir,output_dir,final_file_tif), 
+#     #     rgb_modified.astype(raw_data_type))
 
-    # # show the 8-bit color image as a quick preview (lower quality)
-    # if console==False:
-    #     plt.figure(figsize=(6,4),dpi=200)
-    #     plt.xlabel('Y',fontsize=12)
-    #     plt.ylabel('X',fontsize=12)
-    #     plt.imshow(np.uint8(rgb_modified/256))
-    # print("****************************************************")
-    # print("Final image obtained with colors corrected by modified histogram equalization")
-    # print("Current color correction parameters: (r, g, b) ranges: %7i, %7i, %7i " 
-    #     %(rgb_max[0], rgb_max[1], rgb_max[2]))
-    # print("Current color correction parameters: (r, g, b) gamma: %7.2f, %7.2f, %7.2f " 
-    #     %(rgb_gamma[0], rgb_gamma[1], rgb_gamma[2]))
+#     # # show the 8-bit color image as a quick preview (lower quality)
+#     # if console==False:
+#     #     plt.figure(figsize=(6,4),dpi=200)
+#     #     plt.xlabel('Y',fontsize=12)
+#     #     plt.ylabel('X',fontsize=12)
+#     #     plt.imshow(np.uint8(rgb_modified/256))
+#     # print("****************************************************")
+#     # print("Final image obtained with colors corrected by modified histogram equalization")
+#     # print("Current color correction parameters: (r, g, b) ranges: %7i, %7i, %7i " 
+#     #     %(rgb_max[0], rgb_max[1], rgb_max[2]))
+#     # print("Current color correction parameters: (r, g, b) gamma: %7.2f, %7.2f, %7.2f " 
+#     #     %(rgb_gamma[0], rgb_gamma[1], rgb_gamma[2]))
     
-    # # adjust the color and make the final 8-bit image
-    # tst = time.time()
-    # rgb = frame2rgb_fits(frame_stacked)
+#     # # adjust the color and make the final 8-bit image
+#     # tst = time.time()
+#     # rgb = frame2rgb_fits(frame_stacked)
 
-    # r_bin_file = os.path.splitext(final_file_tif)[0] + '.r'; rgb[:,:,0].tofile(r_bin_file)
-    # g_bin_file = os.path.splitext(final_file_tif)[0] + '.g'; rgb[:,:,1].tofile(g_bin_file)
-    # b_bin_file = os.path.splitext(final_file_tif)[0] + '.b'; rgb[:,:,2].tofile(b_bin_file)
+#     # r_bin_file = os.path.splitext(final_file_tif)[0] + '.r'; rgb[:,:,0].tofile(r_bin_file)
+#     # g_bin_file = os.path.splitext(final_file_tif)[0] + '.g'; rgb[:,:,1].tofile(g_bin_file)
+#     # b_bin_file = os.path.splitext(final_file_tif)[0] + '.b'; rgb[:,:,2].tofile(b_bin_file)
     
-    # # color correction in parallel
-    # m1, m2, npix = np.shape(rgb)[0], np.shape(rgb)[1], rgb.size
-    # tst = time.time()
-    # ic = [0, 1, 2]
-    # im1 = [m1, m1, m1]
-    # im2 = [m2, m2, m2]
-    # ifn = [r_bin_file, g_bin_file, b_bin_file]
-    # dtp = [raw_data_type, raw_data_type, raw_data_type]
-    # with mp.Pool(3) as pool:
-    #     output = [pool.starmap(adjust_color, zip(ic, im1, im2, ifn, dtp))]
+#     # # color correction in parallel
+#     # m1, m2, npix = np.shape(rgb)[0], np.shape(rgb)[1], rgb.size
+#     # tst = time.time()
+#     # ic = [0, 1, 2]
+#     # im1 = [m1, m1, m1]
+#     # im2 = [m2, m2, m2]
+#     # ifn = [r_bin_file, g_bin_file, b_bin_file]
+#     # dtp = [raw_data_type, raw_data_type, raw_data_type]
+#     # with mp.Pool(3) as pool:
+#     #     output = [pool.starmap(adjust_color, zip(ic, im1, im2, ifn, dtp))]
 
-    # # read the color correction result and save to 
-    # rgb[:,:,0] = np.fromfile(r_bin_file, dtype=raw_data_type).reshape(m1, m2); os.remove(r_bin_file)
-    # rgb[:,:,1] = np.fromfile(g_bin_file, dtype=raw_data_type).reshape(m1, m2); os.remove(g_bin_file)
-    # rgb[:,:,2] = np.fromfile(b_bin_file, dtype=raw_data_type).reshape(m1, m2); os.remove(b_bin_file)
-    # print("Color adjusted, time cost:                                %9.2f" %(time.time()-tst)); tst = time.time()
+#     # # read the color correction result and save to 
+#     # rgb[:,:,0] = np.fromfile(r_bin_file, dtype=raw_data_type).reshape(m1, m2); os.remove(r_bin_file)
+#     # rgb[:,:,1] = np.fromfile(g_bin_file, dtype=raw_data_type).reshape(m1, m2); os.remove(g_bin_file)
+#     # rgb[:,:,2] = np.fromfile(b_bin_file, dtype=raw_data_type).reshape(m1, m2); os.remove(b_bin_file)
+#     # print("Color adjusted, time cost:                                %9.2f" %(time.time()-tst)); tst = time.time()
     
 
-    # # save the final figure
-    # imageio.imsave(final_file_tif, rgb.astype(raw_data_type))
+#     # # save the final figure
+#     # imageio.imsave(final_file_tif, rgb.astype(raw_data_type))
 
-    # # show the final figure
-    # plt.figure(figsize=(6,4),dpi=200)
-    # plt.xlabel('Y',fontsize=12)
-    # plt.ylabel('X',fontsize=12)
-    # plt.imshow(np.uint8(rgb))
+#     # # show the final figure
+#     # plt.figure(figsize=(6,4),dpi=200)
+#     # plt.xlabel('Y',fontsize=12)
+#     # plt.ylabel('X',fontsize=12)
+#     # plt.imshow(np.uint8(rgb))
 
 
-# import heapq as hp
-# # subroutine for adjusting the colors 
-# def adjust_color(i, m1, m2, bin_file, raw_data_type):
-#     # number of "too dark" pixels and threshold
-#     val_max = vmax_global
-#     samp = np.fromfile(bin_file, dtype=raw_data_type).reshape(m1*m2)
-#     npix = np.int64(m1)*np.int64(m2)
-#     ndark = int(npix*dark_frac)
-#     d1 = hp.nsmallest(ndark, samp)[ndark-1]*1.
-#     # number of "too bright" pixels and threshold
-#     nbright = int(npix*bright_frac)
-#     d2 = hp.nlargest(nbright, samp)[nbright-1]*1.
-#     # re-scaling, note that this requires 16-bit to save weak signal from bright sky-light
-#     # note that val is expected to be in range [0,1]. Out-of-range values will be truncated.
-#     val = np.float64(samp-d1)/np.float64(d2-d1)
-#     val = np.where(val<=0, 1./val_max, val)
-#     val = np.where(val >1, 1, val)
-#     samp = (val**rgb_gamma[i])*val_max*rgb_fac[i]
-#     samp = np.where(samp<      0,       0, samp)
-#     samp = np.where(samp>val_max, val_max, samp)
-#     samp.astype(raw_data_type).tofile(bin_file)
+# # import heapq as hp
+# # # subroutine for adjusting the colors 
+# # def adjust_color(i, m1, m2, bin_file, raw_data_type):
+# #     # number of "too dark" pixels and threshold
+# #     val_max = vmax_global
+# #     samp = np.fromfile(bin_file, dtype=raw_data_type).reshape(m1*m2)
+# #     npix = np.int64(m1)*np.int64(m2)
+# #     ndark = int(npix*dark_frac)
+# #     d1 = hp.nsmallest(ndark, samp)[ndark-1]*1.
+# #     # number of "too bright" pixels and threshold
+# #     nbright = int(npix*bright_frac)
+# #     d2 = hp.nlargest(nbright, samp)[nbright-1]*1.
+# #     # re-scaling, note that this requires 16-bit to save weak signal from bright sky-light
+# #     # note that val is expected to be in range [0,1]. Out-of-range values will be truncated.
+# #     val = np.float64(samp-d1)/np.float64(d2-d1)
+# #     val = np.where(val<=0, 1./val_max, val)
+# #     val = np.where(val >1, 1, val)
+# #     samp = (val**rgb_gamma[i])*val_max*rgb_fac[i]
+# #     samp = np.where(samp<      0,       0, samp)
+# #     samp = np.where(samp>val_max, val_max, samp)
+# #     samp.astype(raw_data_type).tofile(bin_file)
+
+
+# # Define observation target, either in name or in ra-dec.
+# # in name, use (for example): target = SkyCoord.from_name("m31"); 
+# # in ra-dec, use (for example): target = SkyCoord(ra=45*u.deg, dec=45*u.deg)
+# # For example: 
+# # # M42 by ra-dec: 
+
+# # # M31 by ra-dec: 
+# # target = SkyCoord(ra=10.684793*u.deg, dec=41.269065*u.deg)
+# # # Barnard 33 by ra-dec: 
+# # target = SkyCoord(ra=85.24583333*u.deg, dec=-2.45833333*u.deg)
+
+# # # M42 by name (reqires internet connection)
+# # target = SkyCoord.from_name("m42")
+# # # M31 by name (reqires internet connection)
+# # target = SkyCoord.from_name("m31")
+
+
+
+
+
+
+
+# ##############################################################
+# # Alignment parameters
+# ##############################################################
+# # Camera color type for alignment. "color" means RGB (in form of Bayer
+# # components) are aligned separately, which will automatically correct the
+# # color dispersion due to atmosphere refraction. "mono" means the entire frame
+# # is aligned as one, which is much better for a low signal-to-noise ratio.
+# align_color_mode = "color"
+
+# # 2D High-pass cut frequency as a fraction of the Nyquist frequency. Only for
+# # alignment to reduce background impacts. Will not affect the actual frames.
+# align_hp_ratio = 0.01
+
+# # Tukey window alpha parameter to improve the matched filtering. For example,
+# # 0.04 means 2% at each edge (left, right, top, bottom) is suppressed. Note
+# # that this should match the maximum shifts
+# align_tukey_alpha = 0.2
+
+# # sigma of Gaussian filtering (smoothing), only for alignment.
+# align_gauss_sigma = 8
+
+# # rounds of alignment. In each round a new (better) reference frame is
+# # chosen. 4 is usually more than enough.
+# align_rounds = 4
+
+# # Specify whether or not to fix the field rotation (requires the observation
+# # time, target and site locations). For an Alt-az mount, this is necessary,
+# # but for an equatorial mount this is unnecessary.
+# align_fix_ratation = True
+
+# # Specify whether or not the original observation time is already in UTC. If
+# # this is False, then a time zone correction will be applied.
+# align_time_is_utc = True
+
+# # If true, do not report the alignment result
+# align_report = False
+
+
+# ##############################################################
+# # Precision settings
+# ##############################################################
+# # Working precision takes effect in FFT and matrix multiplication
+# working_precision = np.dtype("float32")
+
+# # Working precision takes effect in FFT and matrix multiplication
+# working_precision_complex = np.dtype("complex64")
+
+
+# ##############################################################
+# # Other parameters
+# ##############################################################
+# # Number of ADC digit. The maximum value should be 2**adc_digit-1. This should
+# # usualLy be 16, even when the actual digit is less, e.g., 12 or 14 bits.
+# adc_digit_limit = 16
+
+# vmax_global = 2**adc_digit_limit - 1
+
+# # Name of the final fits
+# final_file_fits = "frame_stacked.fits"
