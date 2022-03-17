@@ -20,6 +20,7 @@ import astropy.units as u
 
 from scipy import ndimage
 from scipy import fft
+from scipy.stats import linregress
 from scipy.signal.windows import tukey
 from datetime import datetime
 from astropy.io import fits
@@ -114,6 +115,17 @@ output_dir   =   str(df[2][12])
 working_precision         = np.dtype(df[5][16])
 working_precision_complex = np.dtype(df[5][17])
 
+# bias, dark, and flat corrections
+fix_bias = df[2][19].lower() == "true"
+fix_dark = df[2][20].lower() == "true"
+fix_flat = df[2][21].lower() == "true"
+
+dir_bias = df[2][23]
+dir_dark = df[2][24]
+dir_flat = df[2][25]
+
+nproc_setting = int(df[5][20])
+
 # other parameters. 
 # 
 # console: If true, work in console mode, no online figures.
@@ -131,7 +143,10 @@ obs_site = EarthLocation(lon=site_lon*u.deg, lat=site_lat*u.deg, height=site_alt
 # or by name, like target = SkyCoord.from_name("m42")
 target = SkyCoord(ra=ra*u.deg, dec=dec*u.deg)
 # The maximum number of processes, overwritten by the command-line input
-nproc_max = int(mp.cpu_count()/2)
+if nproc_setting == 0:
+    nproc_max = int(mp.cpu_count()/2)
+else:
+    nproc_max = nproc_setting
 # raw data maximum value
 vmax_global = 2**adc_digit_limit - 1
 
@@ -149,6 +164,15 @@ def read_frame_fits(file):
         hdr = hdu[page_num].header
         date_str = hdr[date_tag]
     return frame, date_str, data_type.name
+
+def fix_bias_dark_flat(frame):
+    if fix_bias==True:
+        frame = frame - bias
+    if fix_dark==True:
+        frame = decorr(dark, frame)
+    if fix_flat==True:
+        frame = frame / flat
+    return frame
 
 def read_frame_raw(file):
     with rawpy.imread(file) as raw:
@@ -183,7 +207,58 @@ def write_fits_simple(list_of_data, file, overwrite=True):
         list_of_hdu.append(data2hdu(data))
     hdu2fits(list_of_hdu, file, overwrite=overwrite)
 
+def decorr(x, y):
+    res = linregress(x.flatten(), y.flatten())
+    return y - x*res.slope
 
+# read and average all frames in the folder
+def ave_frame(folder):
+    frame = None
+    n = 0.
+    for root, dirs, files in os.walk(folder):
+        for file in files:
+            if n==0:
+                buff, _, _ = read_frame_fits(os.path.join(folder, file))
+                frame = buff.copy()
+            else:
+                buff, _, _ = read_frame_fits(os.path.join(folder, file))
+                frame = frame + buff
+            n = n + 1.
+        break
+    return frame/n
+
+def get_bias_dark_flat():
+    # manage bias, dark and flat frames
+    if fix_bias==True:
+        tst = time.time()
+        print("reading bias frames...")
+        bias = ave_frame(dir_bias)
+        print("bias frames done, time cost: %7.2f" %(time.time()-tst))
+    else:
+        bias = 0.
+
+    if fix_dark==True:
+        tst = time.time()
+        print("reading dark frames...")
+        if fix_bias==True:
+            dark = ave_frame(dir_dark) - bias
+        print("dark frames done, time cost: %7.2f" %(time.time()-tst))
+    else:
+        dark = 0.
+    
+
+    if fix_flat==True:
+        tst = time.time()
+        print("reading flat frames...")
+        if fix_bias==True:
+            flat = ave_frame(dir_flat) - bias
+        if fix_dark==True:
+            flat = decorr(dark, flat)
+        flat = flat / np.median(flat)
+        print("flat frames done, time cost: %7.2f" %(time.time()-tst))
+    else:
+        flat = 1.
+    return bias, dark, flat
 
 ##############################################################
 # FFT routines:
@@ -502,6 +577,9 @@ if align_color_mode!="color" and align_color_mode!="mono":
     print("Error! The color type has to be color or mono!")
     sys.exit()
 
+# get the bias, dark and flat corrections
+bias, dark, flat = get_bias_dark_flat()
+
 # determine the working mode, currently only fits allows field rotation
 # correction
 if extension=="fits" or extension=='fit':
@@ -598,7 +676,7 @@ if align_color_mode=="color":
 else:
     ref_fft = np.frombuffer(shm_ref_fft.buf, dtype=working_precision_complex).reshape(f1s, f2s)
 
-# make and share the array of all frames
+# read all frames, and make the shared array
 if __name__ == '__main__':
     # read frames, save the observation times, and compute the local
     # horizontal reference frames accordingly
@@ -612,7 +690,7 @@ if __name__ == '__main__':
             frame, datet, _ = read_frame_fits(file_lst[i])
         elif mode=="raw":
             frame, datet, _ = read_frame_raw(file_lst[i])
-        buff[i,:,:] = frame
+        buff[i,:,:] = fix_bias_dark_flat(frame)
         list1.append(datet)
     datetime = smm.ShareableList(list1)
     buff = None
@@ -663,13 +741,6 @@ if __name__ == '__main__' and align_fix_ratation==True:
 
     # fix the field rotation (multi-processes)
     tst = time.time()
-    # p1, p2, p3, p4, p5 = [], [], [], [], []
-    # for i in range(n_files):
-    #     p1.append(file_swp[i])
-    #     p2.append(rot_ang[i])
-    #     p3.append(raw_data_type)
-    #     p4.append(n1)
-    #     p5.append(n2)
     with mp.Pool(nproc) as pool:
         output = [pool.map(fix_rotation, range(n_files))]
     print("Field rotation fixed, time cost:                          %9.2f" %(time.time()-tst) )
