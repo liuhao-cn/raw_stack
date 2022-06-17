@@ -126,6 +126,10 @@ dir_flat = df[2][25]
 
 nproc_setting = int(df[5][20])
 
+# fix local extrema?
+fix_local_extrema = df[2][27].lower() == "true"
+fac_local_extrema = float(df[2][28])
+
 # other parameters. 
 # 
 # console: If true, work in console mode, no online figures.
@@ -165,20 +169,13 @@ def read_frame_fits(file):
         date_str = hdr[date_tag]
     return frame, date_str, data_type.name
 
-def fix_bias_dark_flat_extrema(frame):
+def fix_bias_dark_flat(frame):
     if fix_bias==True:
         frame = frame - bias
     if fix_dark==True:
         frame = decorr(dark, frame)
     if fix_flat==True:
         frame = frame / flat
-
-    fsize = len(frame)
-    n_bad = int(fsize*0.00001)
-
-    diff1 = np.abs(frame - np.roll(frame, (0,1)))
-    thr1 = hp.nbiggest(n_bad, diff1.flatten())[n_bad-1]
-    frame[diff1>thr1] = 0
 
     return frame
 
@@ -332,6 +329,30 @@ def periodical_mean(x, period):
     ang_mean = np.arctan2(sx, cx)
     x_mean = ang_mean/2/np.pi*period
     return x_mean
+
+def fix_extrema(i):
+    global frames_working
+
+    if fix_local_extrema is True:
+        frame = frames_working[i,:,:]
+
+        # reshape to separate the Bayer components
+        frame = frame.reshape(int(n1/2), 2, int(n2/2), 2)
+        for jj in range(2):
+            for kk in range(2):
+                frame1 = (frame[:,jj,:,kk]).astype(working_precision).reshape(int(n1/2), int(n2/2))
+                fsize = frame1.size
+                n_bad = int(fsize*fac_local_extrema)
+                diff1 = np.abs(frame1 - np.roll(frame1, ( 0, 1)))**(0.25)
+                diff2 = np.abs(frame1 - np.roll(frame1, ( 0,-1)))**(0.25)
+                diff3 = np.abs(frame1 - np.roll(frame1, ( 1, 0)))**(0.25)
+                diff4 = np.abs(frame1 - np.roll(frame1, (-1, 0)))**(0.25)
+                diff = diff1*diff2*diff3*diff4/np.abs(frame1)
+                thr = hp.nlargest(n_bad, diff.flatten())[n_bad-1]
+                frame1[diff>thr] = 0
+                frame[:,jj,:,kk] = frame1.reshape(int(n1/2), int(n2/2))
+
+        frames_working[i,:,:] = frame.reshape(n1, n2)
 
 # align a frame to the reference frame, do it for the four Bayer components
 # separately so the color dispersion will be corrected at the same time.
@@ -698,7 +719,7 @@ if __name__ == '__main__':
             frame, datet, _ = read_frame_fits(file_lst[i])
         elif mode=="raw":
             frame, datet, _ = read_frame_raw(file_lst[i])
-        buff[i,:,:] = fix_bias_dark_flat_extrema(frame)
+        buff[i,:,:] = fix_bias_dark_flat(frame)
         list1.append(datet)
     datetime = smm.ShareableList(list1)
     buff = None
@@ -770,6 +791,13 @@ if __name__ == '__main__':
     sx, sy = [], []
 
     tst_tot = time.time()
+
+    # fix extrema
+    tst = time.time()
+    with mp.Pool(nproc) as pool:
+        output = pool.map(fix_extrema, range(n_files))
+    print("Extrema fixed, time cost:                                %9.2f" %(time.time()-tst))
+
     for nar in range(align_rounds):
         print("****************************************************")
         print("Alignment round %4i: Frame %4i is the current reference frame." %(nar+1, wid))
@@ -781,6 +809,7 @@ if __name__ == '__main__':
             ref_fft[:,:] = np.conjugate( frame2fft(frames_working[wid,:,:]) )
         else:
             ref_fft[:,:] = np.conjugate( frame2fft(frames_working[wid,:,:]) )
+        
 
         with mp.Pool(nproc) as pool:
             output = pool.map(align_frames, range(n_files))
