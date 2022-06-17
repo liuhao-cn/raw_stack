@@ -165,13 +165,21 @@ def read_frame_fits(file):
         date_str = hdr[date_tag]
     return frame, date_str, data_type.name
 
-def fix_bias_dark_flat(frame):
+def fix_bias_dark_flat_extrema(frame):
     if fix_bias==True:
         frame = frame - bias
     if fix_dark==True:
         frame = decorr(dark, frame)
     if fix_flat==True:
         frame = frame / flat
+
+    fsize = len(frame)
+    n_bad = int(fsize*0.00001)
+
+    diff1 = np.abs(frame - np.roll(frame, (0,1)))
+    thr1 = hp.nbiggest(n_bad, diff1.flatten())[n_bad-1]
+    frame[diff1>thr1] = 0
+
     return frame
 
 def read_frame_raw(file):
@@ -690,7 +698,7 @@ if __name__ == '__main__':
             frame, datet, _ = read_frame_fits(file_lst[i])
         elif mode=="raw":
             frame, datet, _ = read_frame_raw(file_lst[i])
-        buff[i,:,:] = fix_bias_dark_flat(frame)
+        buff[i,:,:] = fix_bias_dark_flat_extrema(frame)
         list1.append(datet)
     datetime = smm.ShareableList(list1)
     buff = None
