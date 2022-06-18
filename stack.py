@@ -343,13 +343,27 @@ def fix_extrema(i):
                 frame1 = (frame[:,jj,:,kk]).astype(working_precision).reshape(int(n1/2), int(n2/2))
                 fsize = frame1.size
                 n_bad = int(fsize*fac_local_extrema)
-                diff1 = np.abs(frame1 - np.roll(frame1, ( 0, 1)))**(0.25)
-                diff2 = np.abs(frame1 - np.roll(frame1, ( 0,-1)))**(0.25)
-                diff3 = np.abs(frame1 - np.roll(frame1, ( 1, 0)))**(0.25)
-                diff4 = np.abs(frame1 - np.roll(frame1, (-1, 0)))**(0.25)
+                buff1 = np.roll(frame1, ( 0, 1)).flatten()
+                buff2 = np.roll(frame1, ( 0,-1)).flatten()
+                buff3 = np.roll(frame1, ( 1, 0)).flatten()
+                buff4 = np.roll(frame1, (-1, 0)).flatten()
+                s1 = np.roll(frame1, ( 0, 4)).flatten()
+                s2 = np.roll(frame1, ( 0,-4)).flatten()
+                s3 = np.roll(frame1, ( 4, 0)).flatten()
+                s4 = np.roll(frame1, (-4, 0)).flatten()
+
+                frame1 = frame1.flatten()
+                
+                diff1 = np.abs(frame1.flatten() - buff1)**(0.25)
+                diff2 = np.abs(frame1.flatten() - buff2)**(0.25)
+                diff3 = np.abs(frame1.flatten() - buff3)**(0.25)
+                diff4 = np.abs(frame1.flatten() - buff4)**(0.25)
                 diff = diff1*diff2*diff3*diff4/np.abs(frame1)
                 thr = hp.nlargest(n_bad, diff.flatten())[n_bad-1]
-                frame1[diff>thr] = 0
+                
+                id_nan = np.where( diff>thr )[0]
+                frame1[id_nan] = (s1[id_nan] + s2[id_nan] + s3[id_nan] + s4[id_nan])/4
+                # frame1[diff>thr] = 0
                 frame[:,jj,:,kk] = frame1.reshape(int(n1/2), int(n2/2))
 
         frames_working[i,:,:] = frame.reshape(n1, n2)
