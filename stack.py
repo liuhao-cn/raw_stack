@@ -343,7 +343,7 @@ def put_Bayerframe(frame, subframe, index):
     kk = index % 2
     jj = int((index - kk)/2)
     n1, n2 = frame.shape[0], frame.shape[1]
-    frame_copy = frame.copy().reshape(int(n1/2), 2, int(n2/2), 2)
+    frame_copy = frame.reshape(int(n1/2), 2, int(n2/2), 2)
     frame_copy[:,jj,:,kk] = subframe.reshape(int(n1/2), int(n2/2))
     frame_copy = frame_copy.reshape(n1, n2)
     return frame_copy
@@ -407,8 +407,7 @@ def align_frames(i):
         for jj in range(4):
             ff1 = get_Bayerframe(ref_fft, jj)
             ff2 = get_Bayerframe(frame_fft, jj)
-            # fft_comb = (ref_fft[:,jj,:,kk]*frame_fft[:,jj,:,kk]*mask_hp).reshape(f1s,f2s).astype(working_precision_complex)
-            buff_local = np.abs( fft.irfft2(ff1*ff2*mask_hp) )
+            buff_local = np.abs( fft.irfft2(ff1*ff2*mask_hp) ).astype(working_precision_complex)
             index = np.unravel_index(np.argmax(buff_local, axis=None), buff_local.shape)
             s1[jj], s2[jj] = -index[0], -index[1]
 
@@ -420,8 +419,6 @@ def align_frames(i):
             frame1 = get_Bayerframe(frame, jj)
             frame1 = np.roll(frame1, (s1[jj], s2[jj]), axis=(0,1)) - np.mean(frame1)
             frame = put_Bayerframe(frame, frame1, jj)
-            # frame[:,jj,:,kk] = np.roll( frame[:,jj,:,kk].reshape(n1s, n2s), 
-            #     (s1[jj,kk], s2[jj,kk]), axis=(0,1) ) - np.mean(frame[:,jj,:,kk])
     else:
         # compute the frame offset
         fft_comb = (ref_fft*frame_fft*mask_hp).astype(working_precision_complex)
