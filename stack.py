@@ -335,7 +335,7 @@ def get_Bayerframe(frame, index):
     jj = int((index - kk)/2)
     n1, n2 = frame.shape[0], frame.shape[1]
     frame = frame.reshape(int(n1/2), 2, int(n2/2), 2)
-    subframe = (frame[:,jj,:,kk]).astype(working_precision).reshape(int(n1/2), int(n2/2))
+    subframe = (frame[:,jj,:,kk]).reshape(int(n1/2), int(n2/2))
     frame = frame.reshape(n1, n2)
     return subframe
 
@@ -418,7 +418,7 @@ def align_frames(i):
         for jj in range(4):
             # fix the offset for one Bayer component and save into the result array
             frame1 = get_Bayerframe(frame, jj)
-            frame1 = np.roll((s1[jj], s2[jj]), axis=(0,1)) - np.mean(frame1)
+            frame1 = np.roll(frame1, (s1[jj], s2[jj]), axis=(0,1)) - np.mean(frame1)
             frame = put_Bayerframe(frame, frame1, jj)
             # frame[:,jj,:,kk] = np.roll( frame[:,jj,:,kk].reshape(n1s, n2s), 
             #     (s1[jj,kk], s2[jj,kk]), axis=(0,1) ) - np.mean(frame[:,jj,:,kk])
