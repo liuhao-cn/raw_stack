@@ -358,7 +358,6 @@ def fix_extrema(i):
         frame = frames_working[i,:,:]
 
         # reshape to separate the Bayer components
-        frame = frame.reshape(int(n1/2), 2, int(n2/2), 2)
         for jj in range(4):
             frame1 = get_Bayerframe(frame, jj)
 
