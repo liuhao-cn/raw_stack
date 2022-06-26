@@ -291,7 +291,7 @@ def frame2fft(frame):
 
     if align_color_mode=="color":
         # reshape to separate the Bayer components
-        frame_fft = np.zeros([f1s, 2, f2s, 2], dtype=working_precision_complex)
+        frame_fft = np.zeros([f1s*2, f2s*2], dtype=working_precision_complex)
         for jj in range(4):
             frame1 = get_Bayerframe(frame, jj)*win
             frame1 = ndimage.gaussian_filter(frame1, sigma=align_gauss_sigma).astype(working_precision)
