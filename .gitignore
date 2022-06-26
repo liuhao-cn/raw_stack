@@ -8,3 +8,5 @@ obsolete/test_fftw.py
 stack_params.xlsx
 stack_params.xlsx
 adjust_image_params.xlsx
+~$stack_params.xlsx
+*.xlsx
