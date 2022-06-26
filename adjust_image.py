@@ -105,7 +105,7 @@ def read_params(excel_file):
     global working_dir, file_stacked, rgb_vmin, rgb_vmax, hori_inv, vert_inv, \
     down_samp_fac, rgb_nbins, gamma, gauss_sigma, fix_offset, fix_dark, \
     fix_flat, dir_offset, dir_dark, dir_flat, show_image, file_tif, \
-    vertical_clip, horizontal_clip, raw_data_type, bayer_matrix_format, multi_sess
+    vertical_clip, horizontal_clip, raw_data_type, bayer_matrix_format, multi_sess, console_mode
     
     df = pd.read_excel(excel_file)
 
@@ -139,6 +139,7 @@ def read_params(excel_file):
     dir_flat   = df[2][28]
     
     multi_sess = df[2][30].lower() == "true"
+    console_mode = df[2][31].lower() == "true"
 
     show_image      = True
     file_tif        = os.path.join(working_dir, "final_gamma"+str(gamma).format("4.4i")+".tiff")
@@ -235,9 +236,10 @@ imageio.imsave(file_tif, rgb_final.astype(raw_data_type))
 
 
 # show the image
-plt.figure(figsize=(6,4),dpi=200)
-plt.xlabel('Y',fontsize=12)
-plt.ylabel('X',fontsize=12)
-plt.imshow(np.uint8(rgb_final/256))
-plt.show()
+if console_mode == False:
+    plt.figure(figsize=(6,4),dpi=200)
+    plt.xlabel('Y',fontsize=12)
+    plt.ylabel('X',fontsize=12)
+    plt.imshow(np.uint8(rgb_final/256))
+    plt.show()
 

@@ -341,6 +341,7 @@ def fix_extrema(i):
         for jj in range(2):
             for kk in range(2):
                 frame1 = (frame[:,jj,:,kk]).astype(working_precision).reshape(int(n1/2), int(n2/2))
+                frame1[frame1==0] = 1
                 fsize = frame1.size
                 n_bad = int(fsize*fac_local_extrema)
                 buff1 = np.roll(frame1, ( 0, 1)).flatten()
