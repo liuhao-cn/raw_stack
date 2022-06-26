@@ -291,7 +291,6 @@ def frame2fft(frame):
 
     if align_color_mode=="color":
         # reshape to separate the Bayer components
-        frame = frame.reshape(n1s, 2, n2s, 2)
         frame_fft = np.zeros([f1s, 2, f2s, 2], dtype=working_precision_complex)
         for jj in range(4):
             frame1 = get_Bayerframe(frame, jj)*win
