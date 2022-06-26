@@ -293,11 +293,10 @@ def frame2fft(frame):
         # reshape to separate the Bayer components
         frame = frame.reshape(n1s, 2, n2s, 2)
         frame_fft = np.zeros([f1s, 2, f2s, 2], dtype=working_precision_complex)
-        for jj in range(2):
-            for kk in range(2):
-                frame1 = (frame[:,jj,:,kk]*win).astype(working_precision).reshape(n1s, n2s)
-                frame1 = ndimage.gaussian_filter(frame1, sigma=align_gauss_sigma).astype(working_precision)
-                frame_fft[:,jj,:,kk] = fft.rfft2(frame1)
+        for jj in range(4):
+            frame1 = get_Bayerframe(frame, jj)
+            frame1 = ndimage.gaussian_filter(frame1, sigma=align_gauss_sigma).astype(working_precision)
+            frame_fft = put_Bayerframe(frame_fft, fft.rfft2(frame1), jj)
     else:
         frame = frame.reshape(n1, n2)
         frame1 = (frame*win).astype(working_precision)
