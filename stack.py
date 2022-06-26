@@ -330,6 +330,18 @@ def periodical_mean(x, period):
     x_mean = ang_mean/2/np.pi*period
     return x_mean
 
+# get or put a Bayer-frame
+def get_Bayerframe(frame, subframe, index):
+    kk = index % 2
+    jj = int((index - kk)/2)
+    subframe = (frame[:,jj,:,kk]).astype(working_precision).reshape(int(n1/2), int(n2/2))
+
+def put_Bayerframe(frame, subframe, index):
+    kk = index % 2
+    jj = int((index - kk)/2)
+    frame[:,jj,:,kk] = subframe.reshape(int(n1/2), int(n2/2))
+
+
 def fix_extrema(i):
     global frames_working
 
@@ -338,34 +350,33 @@ def fix_extrema(i):
 
         # reshape to separate the Bayer components
         frame = frame.reshape(int(n1/2), 2, int(n2/2), 2)
-        for jj in range(2):
-            for kk in range(2):
-                frame1 = (frame[:,jj,:,kk]).astype(working_precision).reshape(int(n1/2), int(n2/2))
-                frame1[frame1==0] = 1
-                fsize = frame1.size
-                n_bad = int(fsize*fac_local_extrema)
-                buff1 = np.roll(frame1, ( 0, 1)).flatten()
-                buff2 = np.roll(frame1, ( 0,-1)).flatten()
-                buff3 = np.roll(frame1, ( 1, 0)).flatten()
-                buff4 = np.roll(frame1, (-1, 0)).flatten()
-                s1 = np.roll(frame1, ( 0, 4)).flatten()
-                s2 = np.roll(frame1, ( 0,-4)).flatten()
-                s3 = np.roll(frame1, ( 4, 0)).flatten()
-                s4 = np.roll(frame1, (-4, 0)).flatten()
+        for jj in range(4):
+            get_Bayerframe(frame, frame1, jj)
 
-                frame1 = frame1.flatten()
-                
-                diff1 = np.abs(frame1.flatten() - buff1)**(0.25)
-                diff2 = np.abs(frame1.flatten() - buff2)**(0.25)
-                diff3 = np.abs(frame1.flatten() - buff3)**(0.25)
-                diff4 = np.abs(frame1.flatten() - buff4)**(0.25)
-                diff = diff1*diff2*diff3*diff4/np.abs(frame1)
-                thr = hp.nlargest(n_bad, diff.flatten())[n_bad-1]
-                
-                id_nan = np.where( diff>thr )[0]
-                frame1[id_nan] = (s1[id_nan] + s2[id_nan] + s3[id_nan] + s4[id_nan])/4
-                # frame1[diff>thr] = 0
-                frame[:,jj,:,kk] = frame1.reshape(int(n1/2), int(n2/2))
+            frame1[frame1==0] = 1
+            fsize = frame1.size
+            n_bad = int(fsize*fac_local_extrema)
+            buff1 = np.roll(frame1, ( 0, 1)).flatten()
+            buff2 = np.roll(frame1, ( 0,-1)).flatten()
+            buff3 = np.roll(frame1, ( 1, 0)).flatten()
+            buff4 = np.roll(frame1, (-1, 0)).flatten()
+            s1 = np.roll(frame1, ( 0, 4)).flatten()
+            s2 = np.roll(frame1, ( 0,-4)).flatten()
+            s3 = np.roll(frame1, ( 4, 0)).flatten()
+            s4 = np.roll(frame1, (-4, 0)).flatten()
+            frame1 = frame1.flatten()
+            
+            diff1 = np.abs(frame1.flatten() - buff1)**(0.25)
+            diff2 = np.abs(frame1.flatten() - buff2)**(0.25)
+            diff3 = np.abs(frame1.flatten() - buff3)**(0.25)
+            diff4 = np.abs(frame1.flatten() - buff4)**(0.25)
+            diff = diff1*diff2*diff3*diff4/np.abs(frame1)
+            thr = hp.nlargest(n_bad, diff.flatten())[n_bad-1]
+            
+            id_nan = np.where( diff>thr )[0]
+            frame1[id_nan] = (s1[id_nan] + s2[id_nan] + s3[id_nan] + s4[id_nan])/4
+
+            put_Bayerframe(frame, frame1, jj)
 
         frames_working[i,:,:] = frame.reshape(n1, n2)
 
