@@ -293,11 +293,11 @@ def frame2fft(frame):
         # reshape to separate the Bayer components
         frame = frame.reshape(n1s, 2, n2s, 2)
         frame_fft = np.zeros([f1s, 2, f2s, 2], dtype=working_precision_complex)
-        for jj in range(2):
-            for kk in range(2):
-                frame1 = (frame[:,jj,:,kk]*win).astype(working_precision).reshape(n1s, n2s)
-                frame1 = ndimage.gaussian_filter(frame1, sigma=align_gauss_sigma).astype(working_precision)
-                frame_fft[:,jj,:,kk] = fft.rfft2(frame1)
+        for jj in range(4):
+            frame1 = get_Bayerframe(frame, frame1, jj)*win
+            frame1 = ndimage.gaussian_filter(frame1, sigma=align_gauss_sigma).astype(working_precision)
+            frame_fft = put_Bayerframe(frame_fft, fft.rfft2(frame1), jj)
+            # frame_fft[:,jj,:,kk] = fft.rfft2(frame1)
     else:
         frame = frame.reshape(n1, n2)
         frame1 = (frame*win).astype(working_precision)
@@ -334,14 +334,19 @@ def periodical_mean(x, period):
 def get_Bayerframe(frame, index):
     kk = index % 2
     jj = int((index - kk)/2)
+    n1, n2 = frame.shape[0], frame.shape[1]
+    frame = frame.reshape(int(n1/2), 2, int(n2/2), 2)
     subframe = (frame[:,jj,:,kk]).astype(working_precision).reshape(int(n1/2), int(n2/2))
+    frame = frame.reshape(n1, n2)
     return subframe
 
 def put_Bayerframe(frame, subframe, index):
     kk = index % 2
     jj = int((index - kk)/2)
-    frame_copy = frame.copy()
+    n1, n2 = frame.shape[0], frame.shape[1]
+    frame_copy = frame.copy().reshape(int(n1/2), 2, int(n2/2), 2)
     frame_copy[:,jj,:,kk] = subframe.reshape(int(n1/2), int(n2/2))
+    frame_copy = frame_copy.reshape(n1, n2)
     return frame_copy
 
 
@@ -397,26 +402,28 @@ def align_frames(i):
     # fix the color dispersion. However, for a mono-camera, the alignment is
     # done with the average offsets (computed with circular statistics).
     if align_color_mode=="color":
-        frame = frame.reshape(n1s, 2, n2s, 2)
-        s1 = np.zeros([2,2], dtype=np.int32)
-        s2 = np.zeros([2,2], dtype=np.int32)
+        s1 = np.zeros(4, dtype=np.int32)
+        s2 = np.zeros(4, dtype=np.int32)
 
         # compute the frame offset for each Bayer component and save the offsets
-        for jj in range(2):
-            for kk in range(2):
-                fft_comb = (ref_fft[:,jj,:,kk]*frame_fft[:,jj,:,kk]*mask_hp).reshape(f1s,f2s).astype(working_precision_complex)
-                buff_local = np.abs( fft.irfft2(fft_comb) )
-                index = np.unravel_index(np.argmax(buff_local, axis=None), buff_local.shape)
-                s1[jj,kk], s2[jj,kk] = -index[0], -index[1]
+        for jj in range(4):
+            ff1 = get_Bayerframe(ref_fft, jj)
+            ff2 = get_Bayerframe(frame_fft, jj)
+            # fft_comb = (ref_fft[:,jj,:,kk]*frame_fft[:,jj,:,kk]*mask_hp).reshape(f1s,f2s).astype(working_precision_complex)
+            buff_local = np.abs( fft.irfft2(ff1*ff2*mask_hp) )
+            index = np.unravel_index(np.argmax(buff_local, axis=None), buff_local.shape)
+            s1[jj], s2[jj] = -index[0], -index[1]
 
         # apply the offset correction
         s1 = np.round(periodical_norm(s1, n1s)).astype(np.int32)
         s2 = np.round(periodical_norm(s2, n2s)).astype(np.int32)
-        for jj in range(2):
-            for kk in range(2):
-                # fix the offset for one Bayer component and save into the result array
-                frame[:,jj,:,kk] = np.roll( frame[:,jj,:,kk].reshape(n1s, n2s), 
-                    (s1[jj,kk], s2[jj,kk]), axis=(0,1) ) - np.mean(frame[:,jj,:,kk])
+        for jj in range(4):
+            # fix the offset for one Bayer component and save into the result array
+            frame1 = get_Bayerframe(frame, jj)
+            frame1 = np.roll((s1[jj], s2[jj]), axis=(0,1)) - np.mean(frame1)
+            frame = put_Bayerframe(frame, frame1, jj)
+            # frame[:,jj,:,kk] = np.roll( frame[:,jj,:,kk].reshape(n1s, n2s), 
+            #     (s1[jj,kk], s2[jj,kk]), axis=(0,1) ) - np.mean(frame[:,jj,:,kk])
     else:
         # compute the frame offset
         fft_comb = (ref_fft*frame_fft*mask_hp).astype(working_precision_complex)
