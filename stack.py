@@ -335,11 +335,13 @@ def get_Bayerframe(frame, subframe, index):
     kk = index % 2
     jj = int((index - kk)/2)
     subframe = (frame[:,jj,:,kk]).astype(working_precision).reshape(int(n1/2), int(n2/2))
+    return subframe
 
 def put_Bayerframe(frame, subframe, index):
     kk = index % 2
     jj = int((index - kk)/2)
     frame[:,jj,:,kk] = subframe.reshape(int(n1/2), int(n2/2))
+    return frame
 
 
 def fix_extrema(i):
@@ -351,7 +353,7 @@ def fix_extrema(i):
         # reshape to separate the Bayer components
         frame = frame.reshape(int(n1/2), 2, int(n2/2), 2)
         for jj in range(4):
-            get_Bayerframe(frame, frame1, jj)
+            frame1 = get_Bayerframe(frame, frame1, jj)
 
             frame1[frame1==0] = 1
             fsize = frame1.size
@@ -376,7 +378,7 @@ def fix_extrema(i):
             id_nan = np.where( diff>thr )[0]
             frame1[id_nan] = (s1[id_nan] + s2[id_nan] + s3[id_nan] + s4[id_nan])/4
 
-            put_Bayerframe(frame, frame1, jj)
+            frame = put_Bayerframe(frame, frame1, jj)
 
         frames_working[i,:,:] = frame.reshape(n1, n2)
 
