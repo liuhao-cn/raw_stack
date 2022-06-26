@@ -294,7 +294,7 @@ def frame2fft(frame):
         frame = frame.reshape(n1s, 2, n2s, 2)
         frame_fft = np.zeros([f1s, 2, f2s, 2], dtype=working_precision_complex)
         for jj in range(4):
-            frame1 = get_Bayerframe(frame, frame1, jj)*win
+            frame1 = get_Bayerframe(frame, jj)*win
             frame1 = ndimage.gaussian_filter(frame1, sigma=align_gauss_sigma).astype(working_precision)
             frame_fft = put_Bayerframe(frame_fft, fft.rfft2(frame1), jj)
             # frame_fft[:,jj,:,kk] = fft.rfft2(frame1)
@@ -335,7 +335,6 @@ def get_Bayerframe(frame, index):
     kk = index % 2
     jj = int((index - kk)/2)
     n1, n2 = frame.shape[0], frame.shape[1]
-    print(n1, n2)
     frame = frame.reshape(int(n1/2), 2, int(n2/2), 2)
     subframe = (frame[:,jj,:,kk]).astype(working_precision).reshape(int(n1/2), int(n2/2))
     frame = frame.reshape(n1, n2)
