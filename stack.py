@@ -340,8 +340,9 @@ def get_Bayerframe(frame, index):
 def put_Bayerframe(frame, subframe, index):
     kk = index % 2
     jj = int((index - kk)/2)
-    frame_copy = frame.copy()
+    frame_copy = (frame.copy()).reshape(int(n1/2), 2, int(n2/2), 2)
     frame_copy[:,jj,:,kk] = subframe.reshape(int(n1/2), int(n2/2))
+    frame_copy = frame_copy.reshape(n1, n2)
     return frame_copy
 
 
