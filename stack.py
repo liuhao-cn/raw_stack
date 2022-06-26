@@ -291,11 +291,13 @@ def frame2fft(frame):
 
     if align_color_mode=="color":
         # reshape to separate the Bayer components
+        frame = frame.reshape(n1s, 2, n2s, 2)
         frame_fft = np.zeros([f1s, 2, f2s, 2], dtype=working_precision_complex)
-        for jj in range(4):
-            frame1 = get_Bayerframe(frame, jj)
-            frame1 = ndimage.gaussian_filter(frame1, sigma=align_gauss_sigma).astype(working_precision)
-            frame_fft = put_Bayerframe(frame_fft, fft.rfft2(frame1), jj)
+        for jj in range(2):
+            for kk in range(2):
+                frame1 = (frame[:,jj,:,kk]*win).astype(working_precision).reshape(n1s, n2s)
+                frame1 = ndimage.gaussian_filter(frame1, sigma=align_gauss_sigma).astype(working_precision)
+                frame_fft[:,jj,:,kk] = fft.rfft2(frame1)
     else:
         frame = frame.reshape(n1, n2)
         frame1 = (frame*win).astype(working_precision)
@@ -332,17 +334,14 @@ def periodical_mean(x, period):
 def get_Bayerframe(frame, index):
     kk = index % 2
     jj = int((index - kk)/2)
-    frame = frame.reshape(int(n1/2), 2, int(n2/2), 2)
     subframe = (frame[:,jj,:,kk]).astype(working_precision).reshape(int(n1/2), int(n2/2))
-    frame = frame.reshape(n1, n2)
     return subframe
 
 def put_Bayerframe(frame, subframe, index):
     kk = index % 2
     jj = int((index - kk)/2)
-    frame_copy = (frame.copy()).reshape(int(n1/2), 2, int(n2/2), 2)
+    frame_copy = frame.copy()
     frame_copy[:,jj,:,kk] = subframe.reshape(int(n1/2), int(n2/2))
-    frame_copy = frame_copy.reshape(n1, n2)
     return frame_copy
 
 
@@ -353,6 +352,7 @@ def fix_extrema(i):
         frame = frames_working[i,:,:]
 
         # reshape to separate the Bayer components
+        frame = frame.reshape(int(n1/2), 2, int(n2/2), 2)
         for jj in range(4):
             frame1 = get_Bayerframe(frame, jj)
 
