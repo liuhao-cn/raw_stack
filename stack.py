@@ -332,7 +332,9 @@ def periodical_mean(x, period):
 def get_Bayerframe(frame, index):
     kk = index % 2
     jj = int((index - kk)/2)
+    frame = frame.reshape(int(n1/2), 2, int(n2/2), 2)
     subframe = (frame[:,jj,:,kk]).astype(working_precision).reshape(int(n1/2), int(n2/2))
+    frame = frame.reshape(n1, n2)
     return subframe
 
 def put_Bayerframe(frame, subframe, index):
@@ -350,7 +352,6 @@ def fix_extrema(i):
         frame = frames_working[i,:,:]
 
         # reshape to separate the Bayer components
-        frame = frame.reshape(int(n1/2), 2, int(n2/2), 2)
         for jj in range(4):
             frame1 = get_Bayerframe(frame, jj)
 
