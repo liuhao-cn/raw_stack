@@ -735,7 +735,7 @@ if __name__ == '__main__':
 win = np.frombuffer(shm_win.buf, dtype=working_precision).reshape(n1s, n2s)
 mask_hp = np.frombuffer(shm_mask_hp.buf, dtype=working_precision).reshape(f1s, f2s)
 if align_color_mode=="color":
-    ref_fft = np.frombuffer(shm_ref_fft.buf, dtype=working_precision_complex).reshape(f1s, 2, f2s, 2)
+    ref_fft = np.frombuffer(shm_ref_fft.buf, dtype=working_precision_complex).reshape(f1s*2, f2s*2)
 else:
     ref_fft = np.frombuffer(shm_ref_fft.buf, dtype=working_precision_complex).reshape(f1s, f2s)
 
