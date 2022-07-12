@@ -142,7 +142,6 @@ def read_params(excel_file):
     console_mode = df[2][31].lower() == "true"
 
     show_image      = True
-    file_tif        = os.path.join(working_dir, "final_gamma"+str(gamma).format("4.4i")+".tiff")
     vertical_clip   = [vc0, vc1]
     horizontal_clip = [hc0, hc1]
     raw_data_type   = np.uint16
@@ -163,9 +162,10 @@ read_params("adjust_image_params.xlsx")
 
 if len(sys.argv)>1:
     working_dir = sys.argv[1]
-    file_tif    = os.path.join(working_dir, "final_gamma"+str(gamma).format("4.4i")+".tiff")
 if len(sys.argv)>2:
     gamma = int(sys.argv[2])
+
+file_tif  = os.path.join(working_dir, "final_gamma"+str(gamma).format("4.4i")+".tiff")
 
 print("Working directory:         %s" %(working_dir))
 print("Gamma:                     %s" %(gamma))
