@@ -163,7 +163,7 @@ read_params("adjust_image_params.xlsx")
 if len(sys.argv)>1:
     working_dir = sys.argv[1]
 if len(sys.argv)>2:
-    gamma = int(sys.argv[2])
+    gamma = float(sys.argv[2])
 
 file_tif  = os.path.join(working_dir, "final_gamma"+str(gamma).format("4.4i")+".tiff")
 
