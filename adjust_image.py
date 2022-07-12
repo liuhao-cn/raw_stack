@@ -161,6 +161,14 @@ def read_params(excel_file):
 # read parameters from excel
 read_params("adjust_image_params.xlsx")
 
+if len(sys.argv)>1:
+    working_dir = sys.argv[1]
+if len(sys.argv)>2:
+    gamma = sys.argv[2]
+
+print("Working directory:         %s" %(working_dir))
+print("Gamma:                     %s" %(gamma))
+
 # read the stacked frame and make sure the vlaues are all positive
 frame_stacked = read_fits( os.path.join(working_dir, file_stacked) )
 frame_stacked = frame_stacked - np.amin(frame_stacked)

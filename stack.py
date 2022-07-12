@@ -618,15 +618,17 @@ if console == True:
     # In console mode, do not produce online images (but will save pdf
     # instead)
     matplotlib.use('Agg')
-    if len(sys.argv)==4:
+    
+    if len(sys.argv)>1:
         working_dir = sys.argv[1]
+    if len(sys.argv)>2:
         extension = sys.argv[2]
+    if len(sys.argv)>3:
         nproc_max = int(sys.argv[3])
-    else:
-        print("Warning: command-line parameters less than 3, will use the ones in the parameter file:")
-        print("Working directory:         %s" %(working_dir))
-        print("Input file extension:      %s" %(extension))
-        print("Number of processes limit: %s" %(nproc_max))
+    
+    print("Working directory:         %s" %(working_dir))
+    print("Input file extension:      %s" %(extension))
+    print("Number of processes limit: %s" %(nproc_max))
 else:
     # In non-console mode, improve the display effect of Jupyter notebook
     from IPython.core.display import display, HTML
