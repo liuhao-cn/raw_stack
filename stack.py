@@ -930,8 +930,10 @@ if __name__ == '__main__':
 
     print("Done!")
 
-smm.shutdown()
+if __name__ != '__main__':
+    smm.shutdown()
 
+smm.shutdown()
 
 
 
