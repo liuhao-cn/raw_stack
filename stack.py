@@ -930,8 +930,14 @@ if __name__ == '__main__':
 
     print("Done!")
 
-if __name__ != '__main__':
-    smm.shutdown()
+
+# release all "np.frombuffer" variables before releasing the shared memory
+buff = 0
+win = 0
+mask_hp = 0
+ref_fft = 0
+frames_working = 0
+rot_ang = 0
 
 smm.shutdown()
 
