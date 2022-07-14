@@ -931,13 +931,9 @@ if __name__ == '__main__':
     print("Done!")
 
 
-# release all "np.frombuffer" variables before releasing the shared memory
-buff = 0
-win = 0
-mask_hp = 0
-ref_fft = 0
-frames_working = 0
-rot_ang = 0
+# explicitly release all "np.frombuffer()" variables before releasing
+# the shared memory, otherwise smm.shutdown() is unable to release them.
+buff, win, mask_hp, ref_fft, frames_working, rot_ang = 0, 0, 0, 0, 0, 0
 
 smm.shutdown()
 
