@@ -252,5 +252,6 @@ if console_mode == False:
     plt.imshow(np.uint8(rgb_final/256))
     plt.show()
 
-rgb, rgb_corrected = 0, 0
-smm.shutdown()
+if multi_sess == True:
+    rgb, rgb_corrected = 0, 0
+    smm.shutdown()
