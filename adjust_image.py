@@ -164,6 +164,14 @@ if len(sys.argv)>1:
     working_dir = sys.argv[1]
 if len(sys.argv)>2:
     gamma = float(sys.argv[2])
+if len(sys.argv)>3:
+    vc0 = float(sys.argv[3])
+if len(sys.argv)>4:
+    vc1 = float(sys.argv[4])
+if len(sys.argv)>5:
+    hc0 = float(sys.argv[5])
+if len(sys.argv)>6:
+    hc1 = float(sys.argv[6])
 
 file_tif  = os.path.join(working_dir, "final_gamma"+str(gamma).format("4.4i")+".tiff")
 
