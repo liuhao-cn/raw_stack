@@ -142,8 +142,6 @@ def read_params(excel_file):
     console_mode = df[2][31].lower() == "true"
 
     show_image      = True
-    vertical_clip   = [vc0, vc1]
-    horizontal_clip = [hc0, hc1]
     raw_data_type   = np.uint16
     
     if bayer_string.lower()=="rggb":
@@ -172,6 +170,9 @@ if len(sys.argv)>5:
     hc0 = float(sys.argv[5])
 if len(sys.argv)>6:
     hc1 = float(sys.argv[6])
+
+vertical_clip   = [vc0, vc1]
+horizontal_clip = [hc0, hc1]
 
 file_tif  = os.path.join(working_dir, "final_gamma"+str(gamma).format("4.4i")+".tiff")
 
