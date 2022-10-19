@@ -105,7 +105,8 @@ def read_params(excel_file):
     global working_dir, file_stacked, rgb_vmin, rgb_vmax, hori_inv, vert_inv, \
     down_samp_fac, rgb_nbins, gamma, gauss_sigma, fix_offset, fix_dark, \
     fix_flat, dir_offset, dir_dark, dir_flat, show_image, file_tif, \
-    vertical_clip, horizontal_clip, raw_data_type, bayer_matrix_format, multi_sess, console_mode
+    vertical_clip, horizontal_clip, raw_data_type, bayer_matrix_format, \
+    multi_sess, console_mode, vc0, vc1, hc0, hc1
     
     df = pd.read_excel(excel_file)
 
