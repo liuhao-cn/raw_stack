@@ -622,9 +622,11 @@ if console == True:
     if len(sys.argv)>1:
         working_dir = sys.argv[1]
     if len(sys.argv)>2:
-        extension = sys.argv[2]
+        bad_fraction = float(sys.argv[2])
     if len(sys.argv)>3:
-        nproc_max = int(sys.argv[3])
+        extension = sys.argv[3]
+    if len(sys.argv)>4:
+        nproc_max = int(sys.argv[4])
     
     print("Working directory:         %s" %(working_dir))
     print("Input file extension:      %s" %(extension))
