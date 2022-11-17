@@ -418,7 +418,7 @@ def align_frames(i):
         for jj in range(4):
             # fix the offset for one Bayer component and save into the result array
             frame1 = get_Bayerframe(frame, jj)
-            frame1 = np.roll(frame1, (s1[jj], s2[jj]), axis=(0,1)) - np.mean(frame1)
+            frame1 = np.roll(frame1, (s1[jj], s2[jj]), axis=(0,1)) # - np.mean(frame1)
             frame = put_Bayerframe(frame, frame1, jj)
     else:
         # compute the frame offset
@@ -434,7 +434,7 @@ def align_frames(i):
         # apply the offset correction
         s1 = np.round(periodical_norm(s1, n1)).astype(np.int32)
         s2 = np.round(periodical_norm(s2, n2)).astype(np.int32)
-        frame = np.roll( frame, (s1, s2), axis=(0,1) ) - np.mean(frame)
+        frame = np.roll( frame, (s1, s2), axis=(0,1) ) #- np.mean(frame)
 
     # save the aligned binaries (without mean)
     frames_working[i,:,:] = frame.reshape(n1, n2)
@@ -834,6 +834,7 @@ if __name__ == '__main__':
         output = pool.map(fix_extrema, range(n_files))
     print("Extrema fixed, time cost:                                %9.2f" %(time.time()-tst))
 
+
     for nar in range(align_rounds):
         print("****************************************************")
         print("Alignment round %4i: Frame %4i is the current reference frame." %(nar+1, wid))
@@ -846,11 +847,10 @@ if __name__ == '__main__':
         else:
             ref_fft[:,:] = np.conjugate( frame2fft(frames_working[wid,:,:]) )
         
-
         with mp.Pool(nproc) as pool:
             output = pool.map(align_frames, range(n_files))
         print("Alignment round %4i done, time cost:                     %9.2f" %(nar+1, time.time()-tst))
-
+        
         # parse the output and save the offsets
         sx_now, sy_now = parse_offsets(output)
         sx.append(sx_now)
@@ -863,6 +863,8 @@ if __name__ == '__main__':
             break
         else:
             wid = wid1
+
+    print(np.mean(frames_working[0,:,:]))
 
     print("****************************************************")
     print("Alignment done in %4i rounds, time cost:                 %9.2f" %(nar+1, time.time()-tst_tot))

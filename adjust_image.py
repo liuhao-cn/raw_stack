@@ -1,5 +1,5 @@
 import sys
-import cv2, os, imageio, time
+import cv2, os, imageio, time, re
 import numpy as np
 import pandas as pd
 import multiprocessing as mp
@@ -10,6 +10,36 @@ from scipy.signal import resample
 from scipy.stats import linregress
 from multiprocessing.managers import SharedMemoryManager
 
+
+# read frames with the given channel and return the average.
+def get_channel_ave(extension, filter_str):
+    pattern = re.compile(filter_str)
+    i = 0
+    for file in os.listdir(working_dir):
+        res = pattern.search(file)
+        if file.endswith(extension) and res:
+            file = os.path.join(working_dir, file)
+            if i==0:
+                frame = read_fits(file)*1.
+            else:
+                frame = frame + read_fits(file)*1.
+            i = i+1
+    print('Number of files for %12s: %5i' %(filter_str, i))
+    return frame/i
+
+def comb_channels(r, g, b, l=None):
+    shape = r.shape
+    n1, n2 = shape[0], shape[1]
+    frame = np.zeros([n1, n2, 3])
+    if len(np.shape(l)) != 0:
+        frame[:,:,0] = r/(r+g+b)*l 
+        frame[:,:,1] = g/(r+g+b)*l
+        frame[:,:,2] = b/(r+g+b)*l
+    else:
+        frame[:,:,0] = r 
+        frame[:,:,1] = g
+        frame[:,:,2] = b
+    return frame
 
 # define the subroutines
 def rfft2_freq(n1, n2):
@@ -81,6 +111,7 @@ def hist_equal_gamma(i):
     global rgb, rgb_corrected
     # get image histogram
     array = rgb[:,:,i].flatten()
+    array = array - np.amin(array)
     hist, bins = np.histogram(array, rgb_nbins, density=True)
     cdf = hist.cumsum()
     cdf = cdf/np.amax(cdf)
@@ -106,7 +137,7 @@ def read_params(excel_file):
     down_samp_fac, rgb_nbins, gamma, gauss_sigma, fix_offset, fix_dark, \
     fix_flat, dir_offset, dir_dark, dir_flat, show_image, file_tif, \
     vertical_clip, horizontal_clip, raw_data_type, bayer_matrix_format, \
-    multi_sess, console_mode, vc0, vc1, hc0, hc1
+    multi_sess, console_mode, vc0, vc1, hc0, hc1, stack_mode, hist_eq
     
     df = pd.read_excel(excel_file)
 
@@ -141,6 +172,9 @@ def read_params(excel_file):
     
     multi_sess = df[2][30].lower() == "true"
     console_mode = df[2][31].lower() == "true"
+
+    stack_mode = df[2][33].lower()
+    hist_eq = df[2][34].lower() == "true"
 
     show_image      = True
     raw_data_type   = np.uint16
@@ -180,10 +214,32 @@ file_tif  = os.path.join(working_dir, "final_gamma"+str(gamma).format("4.4i")+".
 print("Working directory:         %s" %(working_dir))
 print("Gamma:                     %s" %(gamma))
 
-# read the stacked frame and make sure the vlaues are all positive
-frame_stacked = read_fits( os.path.join(working_dir, file_stacked) )
-frame_stacked = frame_stacked - np.amin(frame_stacked)
-
+# read the stacked frame and make sure the values are all positive
+if stack_mode.lower() == 'color':
+    frame_stacked = read_fits( os.path.join(working_dir, file_stacked) )
+    frame_stacked = frame_stacked - np.amin(frame_stacked)
+elif stack_mode.lower() == 'lrgb':
+    chn_L = get_channel_ave('fit', 'filter-L')
+    chn_R = get_channel_ave('fit', 'filter-R')
+    chn_G = get_channel_ave('fit', 'filter-G')
+    chn_B = get_channel_ave('fit', 'filter-B')
+    frame_stacked = comb_channels(chn_R, chn_G, chn_B, l=chn_L)
+elif stack_mode.lower() == 'lhso':
+    chn_L = get_channel_ave('fit', 'filter-L')
+    chn_R = get_channel_ave('fit', 'filter-H')
+    chn_G = get_channel_ave('fit', 'filter-S')
+    chn_B = get_channel_ave('fit', 'filter-O')
+    frame_stacked = comb_channels(chn_R, chn_G, chn_B, l=chn_L)
+elif stack_mode.lower() == 'rgb':
+    chn_R = get_channel_ave('fit', 'filter-R')
+    chn_G = get_channel_ave('fit', 'filter-G')
+    chn_B = get_channel_ave('fit', 'filter-B')
+    frame_stacked = comb_channels(chn_R, chn_G, chn_B)
+elif stack_mode.lower() == 'hso':
+    chn_R = get_channel_ave('fit', 'filter-H')
+    chn_G = get_channel_ave('fit', 'filter-S')
+    chn_B = get_channel_ave('fit', 'filter-O')
+    frame_stacked = comb_channels(chn_R, chn_G, chn_B)
 
 # record the frame shape
 shape = frame_stacked.shape
@@ -212,15 +268,29 @@ if multi_sess == True:
     shm_rgb_corrected = smm.SharedMemory(rgb.size*rgb.itemsize)
     rgb_corrected = np.frombuffer(shm_rgb_corrected.buf, dtype=np.float64).reshape(n1, n2, 3)
 
-    rgb[:,:,:] = cv2.cvtColor(frame_stacked.astype(raw_data_type), bayer_matrix_format)
-    if __name__ == '__main__':
+    if stack_mode.lower() == 'color':
+        rgb[:,:,:] = cv2.cvtColor(frame_stacked.astype(raw_data_type), bayer_matrix_format)
+    else:
+        rgb[:,:,:] = frame_stacked.astype(raw_data_type)
+
+    if __name__ == '__main__' and hist_eq==True:
         with mp.Pool(3) as pool:
             output = pool.map(hist_equal_gamma, range(3))
+    else:
+        rgb_corrected[:,:,:] = rgb[:,:,:]
 else:
-    rgb = cv2.cvtColor(frame_stacked.astype(raw_data_type), bayer_matrix_format)
-    rgb_corrected = rgb*0
-    for i in range(3):
-        hist_equal_gamma(i)
+    if stack_mode.lower() == 'color':
+        rgb = cv2.cvtColor(frame_stacked.astype(raw_data_type), bayer_matrix_format)
+    else:
+        rgb = frame_stacked.astype(raw_data_type)
+
+    if hist_eq==True:
+        rgb_corrected = rgb*0
+        for i in range(3):
+            hist_equal_gamma(i)
+    else:
+        rgb_corrected = rgb
+
 print("Color correction done,                time cost: %9.2f" %(time.time()-tst) )
 print("Current color correction parameters:  gamma  : %7.2f" %(gamma) )
 
