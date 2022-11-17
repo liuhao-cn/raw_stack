@@ -84,6 +84,7 @@ align_rounds        =   int(df[5][10])
 align_fix_ratation  = (df[5][11].lower() == "true")
 align_time_is_utc   = (df[5][12].lower() == "true")
 align_report        = (df[5][13].lower() == "true")
+align_save          = (df[5][14].lower() == "true")
 
 # File and folder parameters
 #
@@ -112,8 +113,8 @@ date_tag     =   str(df[2][11])
 output_dir   =   str(df[2][12])
 
 # working precision for real and complex numbers
-working_precision         = np.dtype(df[5][16])
-working_precision_complex = np.dtype(df[5][17])
+working_precision         = np.dtype(df[5][17])
+working_precision_complex = np.dtype(df[5][18])
 
 # bias, dark, and flat corrections
 fix_bias = df[2][19].lower() == "true"
@@ -124,7 +125,7 @@ dir_bias = df[2][23]
 dir_dark = df[2][24]
 dir_flat = df[2][25]
 
-nproc_setting = int(df[5][20])
+nproc_setting = int(df[5][21])
 
 # fix local extrema?
 fix_local_extrema = df[2][27].lower() == "true"
@@ -875,6 +876,12 @@ if __name__ == '__main__':
     if thr<0: thr = 0
     w = np.where(w <= thr, 0, w)
     w = w / np.sum(w)
+
+    if align_save==True:
+        for i in range(n_files):
+            if w[i] > thr:
+                file_aligned = os.path.join(fullpath, output_dir, 'aligned', file_lst[i])
+                write_fits_simple([frame_stacked.astype(raw_data_type)], file_aligned, overwrite=True)
 
     # stack the frames with weights.
     tst = time.time()
