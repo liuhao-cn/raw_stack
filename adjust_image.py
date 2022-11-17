@@ -32,9 +32,9 @@ def comb_channels(r, g, b, l=None):
     n1, n2 = shape[0], shape[1]
     frame = np.zeros([n1, n2, 3])
     if len(np.shape(l)) != 0:
-        frame[:,:,0] = r/(r+g+b)*l 
-        frame[:,:,1] = g/(r+g+b)*l
-        frame[:,:,2] = b/(r+g+b)*l
+        frame[:,:,0] = r*1./(r+g+b)*l 
+        frame[:,:,1] = g*1./(r+g+b)*l
+        frame[:,:,2] = b*1./(r+g+b)*l
     else:
         frame[:,:,0] = r 
         frame[:,:,1] = g
