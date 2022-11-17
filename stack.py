@@ -878,10 +878,14 @@ if __name__ == '__main__':
     w = w / np.sum(w)
 
     if align_save==True:
+        print('Will save the aligned frames...')
+        align_dir = os.path.join(fullpath, output_dir, 'aligned')
+        if not os.path.isdir(align_dir):
+            os.mkdir(align_dir)
         for i in range(n_files):
-            if w[i] > thr:
-                file_aligned = os.path.join(fullpath, output_dir, 'aligned', file_lst[i])
-                write_fits_simple([frame_stacked.astype(raw_data_type)], file_aligned, overwrite=True)
+            if w[i] > 0:
+                file_aligned = os.path.join(align_dir, file_lst[i])
+                write_fits_simple([frames_working[i,:,:].astype(raw_data_type)], file_aligned, overwrite=True)
 
     # stack the frames with weights.
     tst = time.time()
