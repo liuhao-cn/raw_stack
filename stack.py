@@ -5,6 +5,9 @@
 # Stack the images in fits or raw files.
 ##############################################################
 
+# Note that the flat file should be in dir_flat and be names like
+# 'L-flat.fit', 'H-flat.fit'...
+
 
 ##############################################################
 # Imports
@@ -121,9 +124,9 @@ fix_bias = df[2][19].lower() == "true"
 fix_dark = df[2][20].lower() == "true"
 fix_flat = df[2][21].lower() == "true"
 
-dir_bias = df[2][23]
-dir_dark = df[2][24]
-dir_flat = df[2][25]
+bias_file = df[2][23]
+dark_file = df[2][24]
+dir_flat  = df[2][25]
 
 nproc_setting = int(df[5][21])
 
@@ -159,7 +162,53 @@ vmax_global = 2**adc_digit_limit - 1
 
 ##############################################################
 # Fits related routines:
+
+def read_frame_simple(file):
+    with fits.open(file) as hdu:
+        n = len(hdu)
+        frame = hdu[n-1].data
+    return frame
+
+# Get the flat frame automatically by the channel name. Note that the flat
+# file should be in dir_flat and be names like 'L-flat.fit', 'H-flat.fit'...
+def get_channel(filename, chn_pattern='filter-.', name_loc=7):
+    pattern = re.compile(chn_pattern)
+    res = pattern.search(filename)
+    chn_name = res.group(0)[name_loc]
+    return chn_name
+
+# read the bias, dark and flat frames. Note that the flat file should be in
+# dir_flat and be named like 'L-flat.fits', 'H-flat.fits'...
+def get_bias_dark_flat():
+    flat_suffix = '-flat.fits'
     
+    if fix_bias==True:
+        bias = read_frame_simple(bias_file)
+    else:
+        bias = 0.
+
+    if fix_dark==True:
+        dark = read_frame_simple(dark_file)
+        if fix_bias==True:
+            dark = dark - bias
+    else:
+        dark = 0.
+
+    if fix_flat==True:
+        flat = {'L':None}
+        for chn in channels:
+            file_flat = os.path.join(dir_flat, chn) + flat_suffix
+            frame = read_frame_simple(file_flat)
+            if fix_bias==True:
+                frame = frame - bias
+            if fix_dark==True:
+                frame = decorr(dark, frame)
+            flat[chn] = frame.copy()
+    else:
+        flat = 1.
+    
+    return bias, dark, flat
+
 # read fits or raw file and convert to bin so it can be used by
 # multiprocessing returns: frame, time, date type
 def read_frame_fits(file):
@@ -168,17 +217,15 @@ def read_frame_fits(file):
         data_type = frame.dtype
         hdr = hdu[page_num].header
         date_str = hdr[date_tag]
+        if fix_bias==True:
+            frame = frame - bias
+        if fix_dark==True:
+            frame = decorr(dark, frame)
+        if fix_flat==True:
+            fac = flat[get_channel(file)]
+            fac = fac / np.amax(fac)
+            frame = frame / fac
     return frame, date_str, data_type.name
-
-def fix_bias_dark_flat(frame):
-    if fix_bias==True:
-        frame = frame - bias
-    if fix_dark==True:
-        frame = decorr(dark, frame)
-    if fix_flat==True:
-        frame = frame / flat
-
-    return frame
 
 def read_frame_raw(file):
     with rawpy.imread(file) as raw:
@@ -217,54 +264,22 @@ def decorr(x, y):
     res = linregress(x.flatten(), y.flatten())
     return y - x*res.slope
 
-# read and average all frames in the folder
-def ave_frame(folder):
-    frame = None
-    n = 0.
-    for root, dirs, files in os.walk(folder):
-        for file in files:
-            if n==0:
-                buff, _, _ = read_frame_fits(os.path.join(folder, file))
-                frame = buff.copy()
-            else:
-                buff, _, _ = read_frame_fits(os.path.join(folder, file))
-                frame = frame + buff
-            n = n + 1.
-        break
-    return frame/n
+# # read and average all frames in the folder
+# def ave_frame(folder):
+#     frame = None
+#     n = 0.
+#     for root, dirs, files in os.walk(folder):
+#         for file in files:
+#             if n==0:
+#                 buff, _, _ = read_frame_fits(os.path.join(folder, file))
+#                 frame = buff.copy()
+#             else:
+#                 buff, _, _ = read_frame_fits(os.path.join(folder, file))
+#                 frame = frame + buff
+#             n = n + 1.
+#         break
+#     return frame/n
 
-def get_bias_dark_flat():
-    # manage bias, dark and flat frames
-    if fix_bias==True:
-        tst = time.time()
-        print("reading bias frames...")
-        bias = ave_frame(dir_bias)
-        print("bias frames done, time cost: %7.2f" %(time.time()-tst))
-    else:
-        bias = 0.
-
-    if fix_dark==True:
-        tst = time.time()
-        print("reading dark frames...")
-        if fix_bias==True:
-            dark = ave_frame(dir_dark) - bias
-        print("dark frames done, time cost: %7.2f" %(time.time()-tst))
-    else:
-        dark = 0.
-    
-
-    if fix_flat==True:
-        tst = time.time()
-        print("reading flat frames...")
-        if fix_bias==True:
-            flat = ave_frame(dir_flat) - bias
-        if fix_dark==True:
-            flat = decorr(dark, flat)
-        flat = flat / np.median(flat)
-        print("flat frames done, time cost: %7.2f" %(time.time()-tst))
-    else:
-        flat = 1.
-    return bias, dark, flat
 
 ##############################################################
 # FFT routines:
@@ -755,7 +770,7 @@ if __name__ == '__main__':
             frame, datet, _ = read_frame_fits(file_lst[i])
         elif mode=="raw":
             frame, datet, _ = read_frame_raw(file_lst[i])
-        buff[i,:,:] = fix_bias_dark_flat(frame)
+        buff[i,:,:] = frame
         list1.append(datet)
     datetime = smm.ShareableList(list1)
     buff = None
