@@ -12,7 +12,7 @@
 ##############################################################
 # Imports
 ##############################################################
-import os, time, rawpy, sys, matplotlib
+import os, time, rawpy, sys, matplotlib, re
 
 import numpy as np
 import pandas as pd
@@ -128,6 +128,9 @@ bias_file = df[2][23]
 dark_file = df[2][24]
 dir_flat  = df[2][25]
 
+flat_channels = df[5][23].upper()
+chn_pattern = df[5][24]
+
 nproc_setting = int(df[5][21])
 
 # fix local extrema?
@@ -171,10 +174,13 @@ def read_frame_simple(file):
 
 # Get the flat frame automatically by the channel name. Note that the flat
 # file should be in dir_flat and be names like 'L-flat.fit', 'H-flat.fit'...
-def get_channel(filename, chn_pattern='filter-.', name_loc=7):
-    pattern = re.compile(chn_pattern)
+def get_channel(filename, chn_pat=chn_pattern):
+    chn_pat = chn_pat + '.'
+    name_loc = len(chn_pat) - 1
+    pattern = re.compile(chn_pat)
     res = pattern.search(filename)
     chn_name = res.group(0)[name_loc]
+    print(chn_name)
     return chn_name
 
 # read the bias, dark and flat frames. Note that the flat file should be in
@@ -196,7 +202,7 @@ def get_bias_dark_flat():
 
     if fix_flat==True:
         flat = {'L':None}
-        for chn in channels:
+        for chn in flat_channels:
             file_flat = os.path.join(dir_flat, chn) + flat_suffix
             frame = read_frame_simple(file_flat)
             if fix_bias==True:
