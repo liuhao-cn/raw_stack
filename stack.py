@@ -180,7 +180,6 @@ def get_channel(filename, chn_pat=chn_pattern):
     pattern = re.compile(chn_pat)
     res = pattern.search(filename)
     chn_name = res.group(0)[name_loc]
-    print(chn_name)
     return chn_name
 
 # read the bias, dark and flat frames. Note that the flat file should be in
