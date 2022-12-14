@@ -35,7 +35,10 @@ def get_channel_ave(extension, channel):
                     frame = frame + read_fits(file)*1.
                 i = i+1
     print('Number of files for %12s: %5i' %(channel, i))
-    return frame/i
+    if i==0:
+        return 0
+    else:
+        return frame/i
 
 def comb_channels(r, g, b, l=None):
     shape = r.shape
