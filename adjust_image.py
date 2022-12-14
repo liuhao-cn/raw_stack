@@ -11,20 +11,30 @@ from scipy.stats import linregress
 from multiprocessing.managers import SharedMemoryManager
 
 
+ # parse the channel names
+def get_channel(filename):
+    chn_pat = chn_pattern
+    chn_pat = chn_pat + '.'
+    name_loc = len(chn_pat) - 1
+    pattern = re.compile(chn_pat)
+    res = pattern.search(filename)
+    chn_name = res.group(0)[name_loc]
+    return chn_name
+
 # read frames with the given channel and return the average.
-def get_channel_ave(extension, filter_str):
-    pattern = re.compile(filter_str)
+def get_channel_ave(extension, channel):
     i = 0
     for file in os.listdir(working_dir):
-        res = pattern.search(file)
-        if file.endswith(extension) and res:
+        if file.endswith(extension):
             file = os.path.join(working_dir, file)
-            if i==0:
-                frame = read_fits(file)*1.
-            else:
-                frame = frame + read_fits(file)*1.
-            i = i+1
-    print('Number of files for %12s: %5i' %(filter_str, i))
+            chn_name = get_channel(file)
+            if chn_name.lower()==channel.lower():
+                if i==0:
+                    frame = read_fits(file)*1.
+                else:
+                    frame = frame + read_fits(file)*1.
+                i = i+1
+    print('Number of files for %12s: %5i' %(channel, i))
     return frame/i
 
 def comb_channels(r, g, b, l=None):
@@ -137,7 +147,8 @@ def read_params(excel_file):
     down_samp_fac, rgb_nbins, gamma, gauss_sigma, fix_offset, fix_dark, \
     fix_flat, dir_offset, dir_dark, dir_flat, show_image, file_tif, \
     vertical_clip, horizontal_clip, raw_data_type, bayer_matrix_format, \
-    multi_sess, console_mode, vc0, vc1, hc0, hc1, stack_mode, hist_eq
+    multi_sess, console_mode, vc0, vc1, hc0, hc1, stack_mode, hist_eq, \
+    chn_pattern
     
     df = pd.read_excel(excel_file)
 
@@ -176,6 +187,9 @@ def read_params(excel_file):
     stack_mode = df[2][33].lower()
     hist_eq = df[2][34].lower() == "true"
 
+    chn_pattern = df[2][36]
+    print('***********', chn_pattern)
+
     show_image      = True
     raw_data_type   = np.uint16
     
@@ -192,6 +206,8 @@ def read_params(excel_file):
 # Run image adjustment and corrections
 # read parameters from excel
 read_params("adjust_image_params.xlsx")
+
+print('------------------', chn_pattern)
 
 if len(sys.argv)>1:
     working_dir = sys.argv[1]
@@ -219,26 +235,26 @@ if stack_mode.lower() == 'color':
     frame_stacked = read_fits( os.path.join(working_dir, file_stacked) )
     frame_stacked = frame_stacked - np.amin(frame_stacked)
 elif stack_mode.lower() == 'lrgb':
-    chn_L = get_channel_ave('fit', 'filter-L')
-    chn_R = get_channel_ave('fit', 'filter-R')
-    chn_G = get_channel_ave('fit', 'filter-G')
-    chn_B = get_channel_ave('fit', 'filter-B')
+    chn_L = get_channel_ave('fit', 'L')
+    chn_R = get_channel_ave('fit', 'R')
+    chn_G = get_channel_ave('fit', 'G')
+    chn_B = get_channel_ave('fit', 'B')
     frame_stacked = comb_channels(chn_R, chn_G, chn_B, l=chn_L)
 elif stack_mode.lower() == 'lhso':
-    chn_L = get_channel_ave('fit', 'filter-L')
-    chn_R = get_channel_ave('fit', 'filter-H')
-    chn_G = get_channel_ave('fit', 'filter-S')
-    chn_B = get_channel_ave('fit', 'filter-O')
+    chn_L = get_channel_ave('fit', 'L')
+    chn_R = get_channel_ave('fit', 'H')
+    chn_G = get_channel_ave('fit', 'S')
+    chn_B = get_channel_ave('fit', 'O')
     frame_stacked = comb_channels(chn_R, chn_G, chn_B, l=chn_L)
 elif stack_mode.lower() == 'rgb':
-    chn_R = get_channel_ave('fit', 'filter-R')
-    chn_G = get_channel_ave('fit', 'filter-G')
-    chn_B = get_channel_ave('fit', 'filter-B')
+    chn_R = get_channel_ave('fit', 'R')
+    chn_G = get_channel_ave('fit', 'G')
+    chn_B = get_channel_ave('fit', 'B')
     frame_stacked = comb_channels(chn_R, chn_G, chn_B)
 elif stack_mode.lower() == 'hso':
-    chn_R = get_channel_ave('fit', 'filter-H')
-    chn_G = get_channel_ave('fit', 'filter-S')
-    chn_B = get_channel_ave('fit', 'filter-O')
+    chn_R = get_channel_ave('fit', 'H')
+    chn_G = get_channel_ave('fit', 'S')
+    chn_B = get_channel_ave('fit', 'O')
     frame_stacked = comb_channels(chn_R, chn_G, chn_B)
 
 # record the frame shape
@@ -321,6 +337,7 @@ else:
 
 
 # save the 48-bit color image
+print(file_tif)
 imageio.imsave(file_tif, rgb_final.astype(raw_data_type))
 
 
