@@ -1,14 +1,41 @@
 import sys
 import cv2, os, imageio, time, re
+
 import numpy as np
 import pandas as pd
 import multiprocessing as mp
 import astropy.io.fits as fits
 import matplotlib.pyplot as plt
+import adjust_params as par
+
 from scipy import ndimage
 from scipy.signal import resample
 from scipy.stats import linregress
 from multiprocessing.managers import SharedMemoryManager
+
+working_dir         = par.working_dir         
+file_stacked        = par.file_stacked        
+rgb_vmin            = par.rgb_vmin            
+rgb_vmax            = par.rgb_vmax            
+bayer_string        = par.bayer_string        
+hori_inv            = par.hori_inv            
+vert_inv            = par.vert_inv            
+vc0                 = par.vc0                 
+vc1                 = par.vc1                 
+hc0                 = par.hc0                 
+hc1                 = par.hc1                 
+down_samp_fac       = par.down_samp_fac       
+rgb_nbins           = par.rgb_nbins           
+gamma               = par.gamma               
+gauss_sigma         = par.gauss_sigma         
+multi_sess          = par.multi_sess          
+console_mode        = par.console_mode        
+stack_mode          = par.stack_mode          
+hist_eq             = par.hist_eq             
+chn_pattern         = par.chn_pattern         
+show_image          = par.show_image          
+raw_data_type       = par.raw_data_type       
+bayer_matrix_format = par.bayer_matrix_format 
 
 
  # parse the channel names
@@ -145,72 +172,6 @@ def norm_arr(array, vmin, vmax):
     x = (x-xmin)/(xmax-xmin)*(vmax-vmin) + vmin
     return x
 
-def read_params(excel_file):
-    global working_dir, file_stacked, rgb_vmin, rgb_vmax, hori_inv, vert_inv, \
-    down_samp_fac, rgb_nbins, gamma, gauss_sigma, fix_offset, fix_dark, \
-    fix_flat, dir_offset, dir_dark, dir_flat, show_image, file_tif, \
-    vertical_clip, horizontal_clip, raw_data_type, bayer_matrix_format, \
-    multi_sess, console_mode, vc0, vc1, hc0, hc1, stack_mode, hist_eq, \
-    chn_pattern
-    
-    df = pd.read_excel(excel_file)
-
-    working_dir  = df[2][1]
-    file_stacked = df[2][2]
-
-    rgb_vmin = int(df[2][4])
-    rgb_vmax = int(df[2][5])
-
-    bayer_string = df[2][6]
-
-    hori_inv = df[2][8].lower() == "true"
-    vert_inv = df[2][9].lower() == "true"
-
-    vc0 = float(df[2][11])
-    vc1 = float(df[2][12])
-    hc0 = float(df[2][14])
-    hc1 = float(df[2][15])
-
-    down_samp_fac = float(df[2][17])
-    rgb_nbins     = int(df[2][18])
-    gamma         = float(df[2][19])
-    gauss_sigma   = float(df[2][20])
-
-    fix_offset = df[2][22].lower() == "true"
-    fix_dark   = df[2][23].lower() == "true"
-    fix_flat   = df[2][24].lower() == "true"
-
-    dir_offset = df[2][26]
-    dir_dark   = df[2][27]
-    dir_flat   = df[2][28]
-    
-    multi_sess = df[2][30].lower() == "true"
-    console_mode = df[2][31].lower() == "true"
-
-    stack_mode = df[2][33].lower()
-    hist_eq = df[2][34].lower() == "true"
-
-    chn_pattern = df[2][36]
-    print('***********', chn_pattern)
-
-    show_image      = True
-    raw_data_type   = np.uint16
-    
-    if bayer_string.lower()=="rggb":
-        bayer_matrix_format = cv2.COLOR_BayerRG2RGB
-    elif bayer_string.lower()=="bggr":
-        bayer_matrix_format = cv2.COLOR_BayerBG2RGB
-    elif bayer_string.lower()=="grbg":
-        bayer_matrix_format = cv2.COLOR_BayerGR2RGB
-    else:
-        bayer_matrix_format = cv2.COLOR_BayerGB2RGB
-
-
-# Run image adjustment and corrections
-# read parameters from excel
-read_params("adjust_image_params.xlsx")
-
-print('------------------', chn_pattern)
 
 if len(sys.argv)>1:
     working_dir = sys.argv[1]
