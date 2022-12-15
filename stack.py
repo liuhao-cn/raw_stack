@@ -14,6 +14,8 @@
 ##############################################################
 import os, time, rawpy, sys, matplotlib, re
 
+import stack_params as par
+
 import numpy as np
 import pandas as pd
 import multiprocessing as mp
@@ -33,121 +35,50 @@ from astropy.time import TimezoneInfo
 from multiprocessing.managers import SharedMemoryManager
 
 
-# read in parameters from the excel form
-df = pd.read_excel("stack_params.xlsx")
+site_lon                    = par.site_lon                    
+site_lat                    = par.site_lat                    
+site_alt                    = par.site_alt                    
+tzone                       = par.tzone                       
+ra                          = par.ra                          
+dec                         = par.dec     
 
-# longitude, latitude, altitude and time zone of the observatory
-site_lon     = float(df[2][1])
-site_lat     = float(df[2][2])
-site_alt     = float(df[2][3])
-tzone        =   int(df[2][4])
+align_color_mode            = par.align_color_mode            
+align_hp_ratio              = par.align_hp_ratio              
+align_tukey_alpha           = par.align_tukey_alpha           
+align_gauss_sigma           = par.align_gauss_sigma           
+align_rounds                = par.align_rounds                
+align_fix_rotation          = par.align_fix_rotation          
+align_time_is_utc           = par.align_time_is_utc           
+align_report                = par.align_report                
+align_save                  = par.align_save                  
 
-# (ra, dec) of the observation target
-ra           = float(df[5][1])
-dec          = float(df[5][2])
+working_dir                 = par.working_dir                 
+extension                   = par.extension                   
+bad_fraction                = par.bad_fraction                
+page_num                    = par.page_num                    
+date_tag                    = par.date_tag                    
+output_dir                  = par.output_dir                  
 
-# Alignment parameters
-#
-# align_color_mode: Camera color type for alignment. "color" means RGB
-# (in form of Bayer components) are aligned separately, which will
-# automatically correct the color dispersion due to atmosphere
-# refraction. "mono" means the entire frame is aligned as one, which is
-# much better for a low signal-to-noise ratio.
-#
-# align_hp_ratio: 2D High-pass cut frequency as a fraction of the
-# Nyquist frequency. Only for alignment to reduce background impacts.
-# Will not affect the actual frames.
-#
-# align_tukey_alpha: Tukey window alpha parameter to improve the matched
-# filtering. For example, 0.04 means 2% at each edge (left, right, top,
-# bottom) is suppressed. Note that this should match the maximum shifts
-#
-# align_gauss_sigma: sigma of Gaussian filtering (smoothing), only for
-# alignment.
-#
-# align_rounds: rounds of alignment. In each round a new (better)
-# reference frame is chosen. 4 is usually more than enough.
-#
-# align_fix_ratation: Specify whether or not to fix the field rotation
-# (requires the observation time, target and site locations). For an
-# Alt-az mount, this is necessary, but for an equatorial mount this is
-# unnecessary.
-#
-# align_time_is_utc: Specify whether or not the original observation
-# time is already in UTC. If this is False, then a time zone correction
-# will be applied.
-#
-# align_report: If true, do not report the alignment result
-#
-align_color_mode    =   str(df[5][ 6])
-align_hp_ratio      = float(df[5][ 7])
-align_tukey_alpha   = float(df[5][ 8])
-align_gauss_sigma   = float(df[5][ 9])
-align_rounds        =   int(df[5][10])
-align_fix_ratation  = (df[5][11].lower() == "true")
-align_time_is_utc   = (df[5][12].lower() == "true")
-align_report        = (df[5][13].lower() == "true")
-align_save          = (df[5][14].lower() == "true")
+working_precision           = par.working_precision           
+working_precision_complex   = par.working_precision_complex   
 
-# File and folder parameters
-#
-# working_dir: Working directory, all raw or fits files should be in
-# this directory. Will be overwritten by the command-line parameter.
-#
-# extension: Define the input file extension. All files in the working
-# directory with this extension will be used. If this is fits or fit,
-# work in fits mode (usually for an astro-camera), otherwise work in raw
-# mode (usually for a DSLR). Will be overwritten by the command-line
-# parameter.
-#
-# bad_fraction: Fraction of frames that will not be used
-#
-# page_num: Page number of data in the fits file
-#
-# date_tag: Tag in fits file for the obs. date and time information
-#
-# output_dir: output directory
-#
-working_dir  =   str(df[2][7])
-extension    =   str(df[2][8])
-bad_fraction = float(df[2][9])
-page_num     =   int(df[2][10])
-date_tag     =   str(df[2][11])
-output_dir   =   str(df[2][12])
+fix_bias                    = par.fix_bias                    
+fix_dark                    = par.fix_dark                    
+fix_flat                    = par.fix_flat                    
+bias_file                   = par.bias_file                   
+dark_file                   = par.dark_file                   
+dir_flat                    = par.dir_flat                    
 
-# working precision for real and complex numbers
-working_precision         = np.dtype(df[5][17])
-working_precision_complex = np.dtype(df[5][18])
+flat_channels               = par.flat_channels               
+chn_pattern                 = par.chn_pattern                 
+nproc_setting               = par.nproc_setting               
 
-# bias, dark, and flat corrections
-fix_bias = df[2][19].lower() == "true"
-fix_dark = df[2][20].lower() == "true"
-fix_flat = df[2][21].lower() == "true"
+fix_local_extrema           = par.fix_local_extrema           
+fac_local_extrema           = par.fac_local_extrema           
 
-bias_file = df[2][23]
-dark_file = df[2][24]
-dir_flat  = df[2][25]
-
-flat_channels = df[5][23].upper()
-chn_pattern = df[5][24]
-
-nproc_setting = int(df[5][21])
-
-# fix local extrema?
-fix_local_extrema = df[2][27].lower() == "true"
-fac_local_extrema = float(df[2][28])
-
-# other parameters. 
-# 
-# console: If true, work in console mode, no online figures.
-#
-# adc_digit_limit: upper limit for the ADC digit, should usually be 16.
-#
-# final_file_fits: the final output file.
-#
-console         = (df[2][15].lower() == "true")
-adc_digit_limit = int(df[2][16])
-final_file_fits = str(df[2][17])
+console                     = par.console        
+adc_digit_limit             = par.adc_digit_limit
+final_file_fits             = par.final_file_fits
 
 
 obs_site = EarthLocation(lon=site_lon*u.deg, lat=site_lat*u.deg, height=site_alt*u.m)
@@ -671,7 +602,7 @@ if extension=="fits" or extension=='fit':
     mode = "fits"
 else:
     mode = "raw"
-    align_fix_ratation = False
+    align_fix_rotation = False
     align_time_is_utc = False
 
 # make a list of working files and determine the number of processes to be used
@@ -784,10 +715,10 @@ if __name__ == '__main__':
 frames_working = np.frombuffer(shm_frames.buf, dtype=working_precision).reshape(n_files, n1, n2)
 
 # make and share arrays of field rotation
-if __name__ == '__main__' and align_fix_ratation==True:
+if __name__ == '__main__' and align_fix_rotation==True:
     shm_rot_ang = smm.SharedMemory(n_files*working_precision.itemsize)
 
-if align_fix_ratation==True:
+if align_fix_rotation==True:
     rot_ang = np.frombuffer(shm_rot_ang.buf, dtype=working_precision).reshape(n_files)
 
 print("Initialization done, time cost:                           %9.2f" %(time.time()-tst_tot))
@@ -797,7 +728,7 @@ print("Initialization done, time cost:                           %9.2f" %(time.t
 ##############################################################
 # Fix field rotations if necessary (multi-processes)
 ##############################################################
-if __name__ == '__main__' and align_fix_ratation==True:
+if __name__ == '__main__' and align_fix_rotation==True:
     tst = time.time()
     if align_time_is_utc==False:
         time_shift = tzone*u.hour
@@ -833,7 +764,7 @@ if __name__ == '__main__' and align_fix_ratation==True:
 # For all processes: if fix-rotation is required, then read rot_ang from file
 # and reset the reference frame to the one with least rotation (frame already
 # fixed)
-if align_fix_ratation==True:
+if align_fix_rotation==True:
     wid = np.argmin(np.abs(rot_ang))
 else:
     wid = 0
@@ -1139,7 +1070,7 @@ smm.shutdown()
 # # Specify whether or not to fix the field rotation (requires the observation
 # # time, target and site locations). For an Alt-az mount, this is necessary,
 # # but for an equatorial mount this is unnecessary.
-# align_fix_ratation = True
+# align_fix_rotation = True
 
 # # Specify whether or not the original observation time is already in UTC. If
 # # this is False, then a time zone correction will be applied.
