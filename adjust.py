@@ -127,20 +127,6 @@ def read_fits(file):
         frame = hdu[n-1].data
     return frame
 
-# read and average all frames in the folder
-def ave_frame(folder):
-    frame = None
-    n = 0.
-    for root, dirs, files in os.walk(folder):
-        for file in files:
-            if n==0:
-                frame = read_fits(os.path.join(folder, file))
-            else:
-                frame = frame + read_fits(os.path.join(folder, file))
-            n = n + 1.
-        break
-    return frame/n
-
 # decorrelate x from y
 def decorr(x, y):
     res = linregress(x.flatten(), y.flatten())
