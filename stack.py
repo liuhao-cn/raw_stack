@@ -101,6 +101,7 @@ def read_frame_simple(file):
     with fits.open(file) as hdu:
         n = len(hdu)
         frame = hdu[n-1].data
+    frame = frame.astype(working_precision)
     return frame
 
 # Get the flat frame automatically by the channel name. Note that the flat
@@ -139,6 +140,7 @@ def get_bias_dark_flat():
                 frame = frame - bias
             if fix_dark==True:
                 frame = decorr(dark, frame)
+            frame = frame / np.amax(frame)
             flat[chn] = frame.copy()
     else:
         flat = 1.
@@ -150,6 +152,7 @@ def get_bias_dark_flat():
 def read_frame_fits(file):
     with fits.open(file) as hdu:
         frame = hdu[page_num].data
+        frame = frame.astype(working_precision)
         data_type = frame.dtype
         hdr = hdu[page_num].header
         date_str = hdr[date_tag]
@@ -158,9 +161,7 @@ def read_frame_fits(file):
         if fix_dark==True:
             frame = decorr(dark, frame)
         if fix_flat==True:
-            fac = flat[get_channel(file)]
-            fac = fac / np.amax(fac)
-            frame = frame / fac
+            frame = frame / flat[get_channel(file)]
     return frame, date_str, data_type.name
 
 def read_frame_raw(file):
@@ -199,22 +200,6 @@ def write_fits_simple(list_of_data, file, overwrite=True):
 def decorr(x, y):
     res = linregress(x.flatten(), y.flatten())
     return y - x*res.slope
-
-# # read and average all frames in the folder
-# def ave_frame(folder):
-#     frame = None
-#     n = 0.
-#     for root, dirs, files in os.walk(folder):
-#         for file in files:
-#             if n==0:
-#                 buff, _, _ = read_frame_fits(os.path.join(folder, file))
-#                 frame = buff.copy()
-#             else:
-#                 buff, _, _ = read_frame_fits(os.path.join(folder, file))
-#                 frame = frame + buff
-#             n = n + 1.
-#         break
-#     return frame/n
 
 
 ##############################################################
