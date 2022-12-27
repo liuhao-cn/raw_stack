@@ -56,10 +56,11 @@ def get_channel_ave(extension, channel):
             file = os.path.join(working_dir, file)
             chn_name = get_channel(file)
             if chn_name.lower()==channel.lower():
+                buff = read_fits(file)*1.
                 if i==0:
-                    frame = read_fits(file)*1.
+                    frame = buff
                 else:
-                    frame = frame + read_fits(file)*1.
+                    frame = frame + buff
                 i = i+1
     print('Number of files for %12s: %5i' %(channel, i))
     if i==0:
@@ -123,14 +124,8 @@ def wiener2D_simple(array, frac):
 
 def read_fits(file):
     with fits.open(file) as hdu:
-        n = len(hdu)
-        frame = hdu[n-1].data
+        frame = hdu[len(hdu)-1].data
     return frame
-
-# decorrelate x from y
-def decorr(x, y):
-    res = linregress(x.flatten(), y.flatten())
-    return y - x*res.slope
 
 # do histogram equalization and gamma correction for one channel
 def hist_equal_gamma(i):
@@ -139,17 +134,41 @@ def hist_equal_gamma(i):
     array = rgb[:,:,i].flatten()
     array = array - np.amin(array)
     hist, bins = np.histogram(array, rgb_nbins, density=True)
+    hist = hist[0:rgb_nbins-1]
+    bins = bins[0:rgb_nbins-1]
     cdf = hist.cumsum()
     cdf = cdf/np.amax(cdf)
     # use linear interpolation of cdf to find new pixel values
-    array = np.interp(array, bins[:-1], cdf)
-    if gamma != 1:
+    array = np.interp(array, bins, cdf)
+    if gamma[i] != 1:
         x1 = np.linspace(0, 1, num=rgb_nbins)
-        cdf1 = x1**(gamma)
+        cdf1 = x1**(gamma[i])
         array = np.interp(array, x1, cdf1)
     buff = norm_arr(array.reshape(n1, n2), rgb_vmin, rgb_vmax)
     rgb_corrected[:,:,i] = buff
-    # rgb_corrected[:,:,i] = rgb[:,:,i]
+
+
+# cut the edge values by histogram
+def cut_edge_values(i):
+    global rgb, rgb_corrected
+    # get image histogram
+    array = rgb[:,:,i].flatten()
+    hist, bins = np.histogram(array, rgb_nbins, density=True)
+    cdf = hist.cumsum()
+    cdf = cdf/np.amax(cdf)
+    for ind in range(rgb_nbins):
+        if cdf[ind]>0.05:
+            vv0 = bins[ind]
+            break
+    for ind in range(rgb_nbins):
+        if cdf[ind]>0.95:
+            vv1 = bins[ind]
+            break
+    array[array<vv0] = vv0
+    array[array>vv1] = vv1
+    array = norm_arr(array, rgb_vmin, rgb_vmax)
+    rgb_corrected[:,:,i] = array.reshape(n1, n2)
+
 
 def norm_arr(array, vmin, vmax):
     x = array.copy()
@@ -175,7 +194,8 @@ if len(sys.argv)>6:
 vertical_clip   = [vc0, vc1]
 horizontal_clip = [hc0, hc1]
 
-file_tif  = os.path.join(working_dir, "final_gamma"+str(gamma).format("4.4i")+".tiff")
+gamma_str = str(gamma[0]).format("4.4i")+'-'+str(gamma[1]).format("4.4i")+'-'+str(gamma[2]).format("4.4i")
+file_tif  = os.path.join(working_dir, "final_gamma"+gamma_str+".tiff")
 
 print("Working directory:         %s" %(working_dir))
 print("Gamma:                     %s" %(gamma))
@@ -220,7 +240,6 @@ print("Original size:    (hori, vert) = (%6i, %6i)" %(n2, n1) )
 print("Work with subframe: horizontal = (%6i, %6i)" %(h1, h2) )
 print("                      vertical = (%6i, %6i)" %(v1, v2) )
 
-
 # convert stacked frame to linear rgb values (only handle the Bayer matrix)
 tst = time.time()
 if multi_sess == True:
@@ -237,28 +256,32 @@ if multi_sess == True:
     if stack_mode.lower() == 'color':
         rgb[:,:,:] = cv2.cvtColor(frame_stacked.astype(raw_data_type), bayer_matrix_format)
     else:
-        rgb[:,:,:] = frame_stacked.astype(raw_data_type)
+        rgb[:,:,:] = frame_stacked
 
-    if __name__ == '__main__' and hist_eq==True:
-        with mp.Pool(3) as pool:
-            output = pool.map(hist_equal_gamma, range(3))
-    else:
-        rgb_corrected[:,:,:] = rgb[:,:,:]
+    if __name__ == '__main__':
+        if hist_eq==True:
+            with mp.Pool(3) as pool:
+                output = pool.map(hist_equal_gamma, range(3))
+        else:
+            with mp.Pool(3) as pool:
+                output = pool.map(cut_edge_values, range(3))
 else:
     if stack_mode.lower() == 'color':
-        rgb = cv2.cvtColor(frame_stacked.astype(raw_data_type), bayer_matrix_format)
+        rgb = cv2.cvtColor(frame_stacked, bayer_matrix_format)
     else:
-        rgb = frame_stacked.astype(raw_data_type)
+        rgb = frame_stacked
 
     if hist_eq==True:
         rgb_corrected = rgb*0
         for i in range(3):
             hist_equal_gamma(i)
     else:
-        rgb_corrected = rgb
+        rgb_corrected = rgb*0
+        for i in range(3):
+            cut_edge_values(i)
 
 print("Color correction done,                time cost: %9.2f" %(time.time()-tst) )
-print("Current color correction parameters:  gamma  : %7.2f" %(gamma) )
+print("Current color correction parameters:  gamma  : %s" %(gamma_str) )
 
 
 # Gaussian smoothing
@@ -287,7 +310,6 @@ else:
 
 
 # save the 48-bit color image
-print(file_tif)
 imageio.imsave(file_tif, rgb_final.astype(raw_data_type))
 
 
