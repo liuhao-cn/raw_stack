@@ -76,7 +76,6 @@ align_save          = True
 working_dir  = '/home/hao/astro/raw/2022-07-07_21_27_18Z'
 extension    = 'fit'
 bad_fraction = 0.05
-page_num     = 0
 date_tag     = 'DATE-OBS'
 output_dir   = 'output'
 

@@ -54,8 +54,7 @@ align_save                  = par.align_save
 
 working_dir                 = par.working_dir                 
 extension                   = par.extension                   
-bad_fraction                = par.bad_fraction                
-page_num                    = par.page_num                    
+bad_fraction                = par.bad_fraction                                  
 date_tag                    = par.date_tag                    
 output_dir                  = par.output_dir                  
 
@@ -96,14 +95,7 @@ vmax_global = 2**adc_digit_limit - 1
 
 ##############################################################
 # Fits related routines:
-
-def read_frame_simple(file):
-    with fits.open(file) as hdu:
-        n = len(hdu)
-        frame = hdu[n-1].data
-    frame = frame.astype(working_precision)
-    return frame
-
+# 
 # Get the flat frame automatically by the channel name. Note that the flat
 # file should be in dir_flat and be names like 'L-flat.fit', 'H-flat.fit'...
 def get_channel(filename, chn_pat=chn_pattern):
@@ -120,12 +112,12 @@ def get_bias_dark_flat():
     flat_suffix = '-flat.fits'
     
     if fix_bias==True:
-        bias = read_frame_simple(bias_file)
+        bias = read_frame_fits(bias_file)
     else:
         bias = 0.
 
     if fix_dark==True:
-        dark = read_frame_simple(dark_file)
+        dark = read_frame_fits(dark_file)
         if fix_bias==True:
             dark = dark - bias
     else:
@@ -135,7 +127,7 @@ def get_bias_dark_flat():
         flat = {'L':None}
         for chn in flat_channels:
             file_flat = os.path.join(dir_flat, chn) + flat_suffix
-            frame = read_frame_simple(file_flat)
+            frame = read_frame_fits(file_flat)
             if fix_bias==True:
                 frame = frame - bias
             if fix_dark==True:
@@ -151,51 +143,38 @@ def get_bias_dark_flat():
 # multiprocessing returns: frame, time, date type
 def read_frame_fits(file):
     with fits.open(file) as hdu:
+        page_num = len(hdu)-1
         frame = hdu[page_num].data
         frame = frame.astype(working_precision)
-        data_type = frame.dtype
         hdr = hdu[page_num].header
-        date_str = hdr[date_tag]
+        try:
+            date_str = hdr[date_tag]
+        except:
+            date_str = None
         if fix_bias==True:
             frame = frame - bias
         if fix_dark==True:
             frame = decorr(dark, frame)
         if fix_flat==True:
             frame = frame / flat[get_channel(file)]
-    return frame, date_str, data_type.name
+    return frame, date_str
 
 def read_frame_raw(file):
     with rawpy.imread(file) as raw:
-        data_type = raw.raw_image.dtype
         frame = raw.raw_image.copy()
-    return frame, None, data_type.name
-
-# make HDU with property cards
-def data2hdu(data, cards=None, primary=False):
-    # Make HDU
-    if primary:
-        hdu = fits.PrimaryHDU(data)
-    else:
-        hdu = fits.ImageHDU(data)
-    # Set property cards.read_fits
-    if cards != None:
-        hdr = hdu.header
-        for card in cards:
-            hdr.set(card[0], card[1], card[2])
-    return hdu
-
-# write fits file from a list of HDU
-def hdu2fits(list_of_hdu, file, overwrite=True):
-    hdu_list = fits.HDUList(list_of_hdu)
-    hdu_list.writeto(file, overwrite=overwrite)
-    hdu_list.close()
+    return frame, None
 
 # simple program to write array to fits file
-def write_fits_simple(list_of_data, file, overwrite=True):
-    list_of_hdu = [fits.PrimaryHDU(None)]
-    for data in list_of_data:
-        list_of_hdu.append(data2hdu(data))
-    hdu2fits(list_of_hdu, file, overwrite=overwrite)
+def write_frame_fits(frame, file, cards=None, overwrite=True):
+    hdu_prime = fits.PrimaryHDU(None)
+    hdu_frame = fits.ImageHDU(frame)
+    if cards != None:
+        hdr = hdu_frame.header
+        for card in cards:
+            hdr.set(card[0], card[1], card[2])
+    hdu_list = fits.HDUList( [hdu_prime, hdu_frame] )
+    hdu_list.writeto(file, overwrite=overwrite)
+    hdu_list.close()
 
 def decorr(x, y):
     res = linregress(x.flatten(), y.flatten())
@@ -631,10 +610,10 @@ else:
 # information
 if __name__ == '__main__':
     if mode=="fits":
-        frame, _, cache = read_frame_fits(file_lst[0]) 
+        frame, _ = read_frame_fits(file_lst[0]) 
     else:
-        frame, _, cache = read_frame_raw(file_lst[0]) 
-    info_lst = smm.ShareableList([cache, np.shape(frame)[0], np.shape(frame)[1]])
+        frame, _ = read_frame_raw(file_lst[0]) 
+    info_lst = smm.ShareableList([frame.dtype.name, np.shape(frame)[0], np.shape(frame)[1]])
 
 raw_data_type, n1, n2 = info_lst[0], info_lst[1], info_lst[2]
 
@@ -688,9 +667,9 @@ if __name__ == '__main__':
     
     for i in range(n_files):
         if mode=="fits":
-            frame, datet, _ = read_frame_fits(file_lst[i])
+            frame, datet = read_frame_fits(file_lst[i])
         elif mode=="raw":
-            frame, datet, _ = read_frame_raw(file_lst[i])
+            frame, datet = read_frame_raw(file_lst[i])
         buff[i,:,:] = frame
         list1.append(datet)
     datetime = smm.ShareableList(list1)
@@ -823,7 +802,7 @@ if __name__ == '__main__':
         for i in range(n_files):
             if w[i] > 0:
                 file_aligned = os.path.join(align_dir, file_lst[i])
-                write_fits_simple([frames_working[i,:,:].astype(raw_data_type)], file_aligned, overwrite=True)
+                write_frame_fits([frames_working[i,:,:].astype(raw_data_type)], file_aligned, overwrite=True)
 
     # stack the frames with weights.
     tst = time.time()
@@ -833,7 +812,7 @@ if __name__ == '__main__':
     frame_stacked = normalize_frame( frame_stacked, 0, vmax_global )
 
     file_stacked = os.path.join(fullpath,output_dir,final_file_fits)
-    write_fits_simple([frame_stacked.astype(raw_data_type)], file_stacked, overwrite=True)
+    write_frame_fits([frame_stacked.astype(raw_data_type)], file_stacked, overwrite=True)
 
     print("Stacked frame obtained from %4i/%4i frames, time cost.    %9.2f" 
         %(n_files-n_bad, n_files, time.time()-tst))
