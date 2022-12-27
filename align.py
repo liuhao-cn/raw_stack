@@ -14,7 +14,7 @@
 ##############################################################
 import os, time, rawpy, sys, matplotlib, re
 
-import stack_params as par
+import align_params as par
 
 import numpy as np
 import pandas as pd
