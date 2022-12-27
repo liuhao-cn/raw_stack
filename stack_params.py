@@ -53,7 +53,6 @@ align_rounds        = 4
 align_fix_rotation  = False
 align_time_is_utc   = True
 align_report        = False
-align_save          = True
 
 # File and folder parameters
 #
@@ -77,7 +76,7 @@ working_dir  = '/home/hao/astro/raw/2022-07-07_21_27_18Z'
 extension    = 'fit'
 bad_fraction = 0.00
 date_tag     = 'DATE-OBS'
-output_dir   = 'output'
+output_dir   = 'aligned'
 
 # working precision for real and complex numbers
 working_precision         = np.dtype('float32')
@@ -112,4 +111,3 @@ fac_local_extrema = 0.00003
 #
 console         = True
 adc_digit_limit = 16
-final_file_fits = 'frame_stacked.fits'

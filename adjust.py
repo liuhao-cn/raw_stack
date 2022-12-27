@@ -13,34 +13,11 @@ from scipy.signal import resample
 from scipy.stats import linregress
 from multiprocessing.managers import SharedMemoryManager
 
-working_dir         = par.working_dir         
-file_stacked        = par.file_stacked        
-rgb_vmin            = par.rgb_vmin            
-rgb_vmax            = par.rgb_vmax            
-bayer_string        = par.bayer_string        
-hori_inv            = par.hori_inv            
-vert_inv            = par.vert_inv            
-vc0                 = par.vc0                 
-vc1                 = par.vc1                 
-hc0                 = par.hc0                 
-hc1                 = par.hc1                 
-down_samp_fac       = par.down_samp_fac       
-rgb_nbins           = par.rgb_nbins           
-gamma               = par.gamma               
-gauss_sigma         = par.gauss_sigma         
-multi_sess          = par.multi_sess          
-console_mode        = par.console_mode        
-stack_mode          = par.stack_mode          
-hist_eq             = par.hist_eq             
-chn_pattern         = par.chn_pattern         
-show_image          = par.show_image          
-raw_data_type       = par.raw_data_type       
-bayer_matrix_format = par.bayer_matrix_format 
 
 
  # parse the channel names
-def get_channel(filename):
-    chn_pat = chn_pattern
+def read_channel_name(filename):
+    chn_pat = par.chn_pattern
     chn_pat = chn_pat + '.'
     name_loc = len(chn_pat) - 1
     pattern = re.compile(chn_pat)
@@ -49,20 +26,21 @@ def get_channel(filename):
     return chn_name
 
 # read frames with the given channel and return the average.
-def get_channel_ave(extension, channel):
+def ave_by_channel(channel):
     i = 0
-    for file in os.listdir(working_dir):
-        if file.endswith(extension):
-            file = os.path.join(working_dir, file)
-            chn_name = get_channel(file)
-            if chn_name.lower()==channel.lower():
-                buff = read_fits(file)*1.
-                if i==0:
-                    frame = buff
-                else:
-                    frame = frame + buff
+    frame = 0
+    for file in os.listdir(par.working_dir):
+        if file.endswith(par.extension):
+            file = os.path.join(par.working_dir, file)
+            if channel != '':
+                chn_name = read_channel_name(file)
+                if chn_name.lower()==channel.lower():
+                    frame = frame + read_fits(file)*1.
+                    i = i+1
+            else:
+                frame = frame + read_fits(file)*1.
                 i = i+1
-    print('Number of files for %12s: %5i' %(channel, i))
+    print('Number of files for channel %6s: %5i' %(channel, i))
     if i==0:
         return 0
     else:
@@ -133,18 +111,18 @@ def hist_equal_gamma(i):
     # get image histogram
     array = rgb[:,:,i].flatten()
     array = array - np.amin(array)
-    hist, bins = np.histogram(array, rgb_nbins, density=True)
-    hist = hist[0:rgb_nbins-1]
-    bins = bins[0:rgb_nbins-1]
+    hist, bins = np.histogram(array, par.rgb_nbins, density=True)
+    hist = hist[0:par.rgb_nbins-1]
+    bins = bins[0:par.rgb_nbins-1]
     cdf = hist.cumsum()
     cdf = cdf/np.amax(cdf)
     # use linear interpolation of cdf to find new pixel values
     array = np.interp(array, bins, cdf)
-    if gamma[i] != 1:
-        x1 = np.linspace(0, 1, num=rgb_nbins)
-        cdf1 = x1**(gamma[i])
+    if par.gamma[i] != 1:
+        x1 = np.linspace(0, 1, num=par.rgb_nbins)
+        cdf1 = x1**(par.gamma[i])
         array = np.interp(array, x1, cdf1)
-    buff = norm_arr(array.reshape(n1, n2), rgb_vmin, rgb_vmax)
+    buff = norm_arr(array.reshape(n1, n2), par.rgb_vmin, par.rgb_vmax)
     rgb_corrected[:,:,i] = buff
 
 
@@ -153,20 +131,20 @@ def cut_edge_values(i):
     global rgb, rgb_corrected
     # get image histogram
     array = rgb[:,:,i].flatten()
-    hist, bins = np.histogram(array, rgb_nbins, density=True)
+    hist, bins = np.histogram(array, par.rgb_nbins, density=True)
     cdf = hist.cumsum()
     cdf = cdf/np.amax(cdf)
-    for ind in range(rgb_nbins):
+    for ind in range(par.rgb_nbins):
         if cdf[ind]>0.05:
             vv0 = bins[ind]
             break
-    for ind in range(rgb_nbins):
+    for ind in range(par.rgb_nbins):
         if cdf[ind]>0.95:
             vv1 = bins[ind]
             break
     array[array<vv0] = vv0
     array[array>vv1] = vv1
-    array = norm_arr(array, rgb_vmin, rgb_vmax)
+    array = norm_arr(array, par.rgb_vmin, par.rgb_vmax)
     rgb_corrected[:,:,i] = array.reshape(n1, n2)
 
 
@@ -179,52 +157,51 @@ def norm_arr(array, vmin, vmax):
 
 
 if len(sys.argv)>1:
-    working_dir = sys.argv[1]
+    par.working_dir = sys.argv[1]
 if len(sys.argv)>2:
-    gamma = float(sys.argv[2])
+    par.gamma = float(sys.argv[2])
 if len(sys.argv)>3:
-    vc0 = float(sys.argv[3])
+    par.vc0 = float(sys.argv[3])
 if len(sys.argv)>4:
-    vc1 = float(sys.argv[4])
+    par.vc1 = float(sys.argv[4])
 if len(sys.argv)>5:
-    hc0 = float(sys.argv[5])
+    par.hc0 = float(sys.argv[5])
 if len(sys.argv)>6:
-    hc1 = float(sys.argv[6])
+    par.hc1 = float(sys.argv[6])
 
-vertical_clip   = [vc0, vc1]
-horizontal_clip = [hc0, hc1]
+vertical_clip   = [par.vc0, par.vc1]
+horizontal_clip = [par.hc0, par.hc1]
 
-gamma_str = str(gamma[0]).format("4.4i")+'-'+str(gamma[1]).format("4.4i")+'-'+str(gamma[2]).format("4.4i")
-file_tif  = os.path.join(working_dir, "final_gamma"+gamma_str+".tiff")
+gamma_str = str(par.gamma[0]).format("4.4i")+'-'+str(par.gamma[1]).format("4.4i")+'-'+str(par.gamma[2]).format("4.4i")
+file_tif  = os.path.join(par.working_dir, "final gamma"+gamma_str+".tiff")
 
-print("Working directory:         %s" %(working_dir))
-print("Gamma:                     %s" %(gamma))
+print("Working directory:         %s" %(par.working_dir))
+print("gamma:                     %s" %(par.gamma))
 
 # read the stacked frame and make sure the values are all positive
-if stack_mode.lower() == 'color':
-    frame_stacked = read_fits( os.path.join(working_dir, file_stacked) )
-    frame_stacked = frame_stacked - np.amin(frame_stacked)
-elif stack_mode.lower() == 'lrgb':
-    chn_L = get_channel_ave('fit', 'L')
-    chn_R = get_channel_ave('fit', 'R')
-    chn_G = get_channel_ave('fit', 'G')
-    chn_B = get_channel_ave('fit', 'B')
+if par.stack_mode.lower() == 'color':
+    frame_stacked = ave_by_channel('')
+elif par.stack_mode.lower() == 'lrgb':
+    chn_L = ave_by_channel('L')
+    chn_R = ave_by_channel('R')
+    chn_G = ave_by_channel('G')
+    chn_B = ave_by_channel('B')
     frame_stacked = comb_channels(chn_R, chn_G, chn_B, l=chn_L)
-elif stack_mode.lower() == 'lhso':
-    chn_L = get_channel_ave('fit', 'L')
-    chn_R = get_channel_ave('fit', 'H')
-    chn_G = get_channel_ave('fit', 'S')
-    chn_B = get_channel_ave('fit', 'O')
+elif par.stack_mode.lower() == 'lhso':
+    chn_L = ave_by_channel('L')
+    chn_R = ave_by_channel('H')
+    chn_G = ave_by_channel('S')
+    chn_B = ave_by_channel('O')
     frame_stacked = comb_channels(chn_R, chn_G, chn_B, l=chn_L)
-elif stack_mode.lower() == 'rgb':
-    chn_R = get_channel_ave('fit', 'R')
-    chn_G = get_channel_ave('fit', 'G')
-    chn_B = get_channel_ave('fit', 'B')
+elif par.stack_mode.lower() == 'rgb':
+    chn_R = ave_by_channel('R')
+    chn_G = ave_by_channel('G')
+    chn_B = ave_by_channel('B')
     frame_stacked = comb_channels(chn_R, chn_G, chn_B)
-elif stack_mode.lower() == 'hso':
-    chn_R = get_channel_ave('fit', 'H')
-    chn_G = get_channel_ave('fit', 'S')
-    chn_B = get_channel_ave('fit', 'O')
+elif par.stack_mode.lower() == 'hso':
+    chn_R = ave_by_channel('H')
+    chn_G = ave_by_channel('S')
+    chn_B = ave_by_channel('O')
     frame_stacked = comb_channels(chn_R, chn_G, chn_B)
 
 # record the frame shape
@@ -242,7 +219,7 @@ print("                      vertical = (%6i, %6i)" %(v1, v2) )
 
 # convert stacked frame to linear rgb values (only handle the Bayer matrix)
 tst = time.time()
-if multi_sess == True:
+if par.multi_sess == True:
     # start the shared memory manager
     smm = SharedMemoryManager()
     smm.start()
@@ -253,25 +230,25 @@ if multi_sess == True:
     shm_rgb_corrected = smm.SharedMemory(rgb.size*rgb.itemsize)
     rgb_corrected = np.frombuffer(shm_rgb_corrected.buf, dtype=np.float64).reshape(n1, n2, 3)
 
-    if stack_mode.lower() == 'color':
-        rgb[:,:,:] = cv2.cvtColor(frame_stacked.astype(raw_data_type), bayer_matrix_format)
+    if par.stack_mode.lower() == 'color':
+        rgb[:,:,:] = cv2.cvtColor(frame_stacked.astype(par.raw_data_type), par.bayer_matrix_format)
     else:
         rgb[:,:,:] = frame_stacked
 
     if __name__ == '__main__':
-        if hist_eq==True:
+        if par.hist_eq==True:
             with mp.Pool(3) as pool:
                 output = pool.map(hist_equal_gamma, range(3))
         else:
             with mp.Pool(3) as pool:
                 output = pool.map(cut_edge_values, range(3))
 else:
-    if stack_mode.lower() == 'color':
-        rgb = cv2.cvtColor(frame_stacked, bayer_matrix_format)
+    if par.stack_mode.lower() == 'color':
+        rgb = cv2.cvtColor(frame_stacked, par.bayer_matrix_format)
     else:
         rgb = frame_stacked
 
-    if hist_eq==True:
+    if par.hist_eq==True:
         rgb_corrected = rgb*0
         for i in range(3):
             hist_equal_gamma(i)
@@ -281,46 +258,46 @@ else:
             cut_edge_values(i)
 
 print("Color correction done,                time cost: %9.2f" %(time.time()-tst) )
-print("Current color correction parameters:  gamma  : %s" %(gamma_str) )
+print("Current color correction parameters:  gamma  = %s" %(gamma_str) )
 
 
 # Gaussian smoothing
-if gauss_sigma != 0:
+if par.gauss_sigma != 0:
     for i in range(3):
-        rgb_corrected[:,:,i] = ndimage.gaussian_filter(rgb_corrected[:,:,i], sigma=gauss_sigma)
+        rgb_corrected[:,:,i] = ndimage.gaussian_filter(rgb_corrected[:,:,i], sigma=par.gauss_sigma)
 
 # Horizontal or vertial inverting
-if hori_inv==True:
+if par.hori_inv==True:
     rgb_corrected = np.flip(rgb_corrected, axis=1)
-if vert_inv==True:
+if par.vert_inv==True:
     rgb_corrected = np.flip(rgb_corrected, axis=0)
 
 
 # Down-sampling
-if down_samp_fac>1:
-    n1s = int(n1/down_samp_fac)
-    n2s = int(n2/down_samp_fac)
+if par.down_samp_fac>1:
+    n1s = int(n1/par.down_samp_fac)
+    n2s = int(n2/par.down_samp_fac)
     rgb_final = np.zeros([n1s, n2s, 3])
     for i in range(3):
         buff = resample(rgb_corrected[:,:,i], n1s, axis=0)
         buff = resample(buff, n2s, axis=1)
-        rgb_final[:,:,i] = norm_arr(buff, rgb_vmin, rgb_vmax)
+        rgb_final[:,:,i] = norm_arr(buff, par.rgb_vmin, par.rgb_vmax)
 else:
     rgb_final = rgb_corrected
 
 
 # save the 48-bit color image
-imageio.imsave(file_tif, rgb_final.astype(raw_data_type))
+imageio.imsave(file_tif, rgb_final.astype(par.raw_data_type))
 
 
 # show the image
-if console_mode == False:
+if par.console_mode == False:
     plt.figure(figsize=(6,4),dpi=200)
     plt.xlabel('Y',fontsize=12)
     plt.ylabel('X',fontsize=12)
     plt.imshow(np.uint8(rgb_final/256))
     plt.show()
 
-if multi_sess == True:
+if par.multi_sess == True:
     rgb, rgb_corrected = 0, 0
     smm.shutdown()

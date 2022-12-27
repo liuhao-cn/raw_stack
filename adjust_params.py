@@ -1,37 +1,37 @@
 import cv2
 import numpy as np
 
-working_dir  = '/home/hao/astro/raw/2022-07-07_21_27_18Z/output/'
+working_dir  = '/home/hao/astro/raw/2022-07-07_21_27_18Z/output/aligned/'
 file_stacked = 'frame_stacked.fits'
+extension    = 'fit'
 
-rgb_vmin = 200
-rgb_vmax = 64000
-
+rgb_vmin     = 0
+rgb_vmax     = 65535
 bayer_string = 'BGGR'
 
 hori_inv = False
 vert_inv = False
 
-vc0 = 0.2
-vc1 = 0.6
-hc0 = 0.3
-hc1 = 0.7
+vc0 = 0.0
+vc1 = 1.0
+hc0 = 0.0
+hc1 = 1.0
 
 down_samp_fac = 1.0
-rgb_nbins     = 16384
+rgb_nbins     = 8192
 gamma         = [8, 64, 24]
 gauss_sigma   = 0.0
 
-multi_sess = False
+multi_sess   = False
 console_mode = True
 
 # the stack mode can be color, LHSO, HSO, LRGB, RGB
 stack_mode = 'HSO'
 hist_eq = True
 
+# pattern (prefix) of the channel name
 chn_pattern = '_Bin2_'
 
-show_image      = False
 raw_data_type   = np.uint16
 
 if bayer_string.lower()=="rggb":
