@@ -45,7 +45,7 @@ dec          =  -5.389679
 # align_save: If true, the aligned frames will be saved. Nesessary for
 # multi-channel photos.
 #
-align_color_mode    = 'color'
+align_color_mode    = 'mono'
 align_hp_ratio      = 0.010
 align_tukey_alpha   = 0.200
 align_gauss_sigma   = 8
@@ -75,7 +75,7 @@ align_save          = True
 #
 working_dir  = '/home/hao/astro/raw/2022-07-07_21_27_18Z'
 extension    = 'fit'
-bad_fraction = 0.05
+bad_fraction = 0.00
 date_tag     = 'DATE-OBS'
 output_dir   = 'output'
 
@@ -99,7 +99,7 @@ chn_pattern   = '_Bin2_'
 nproc_setting = 0
 
 # fix local extrema?
-fix_local_extrema = True
+fix_local_extrema = False
 fac_local_extrema = 0.00003
 
 # other parameters. 

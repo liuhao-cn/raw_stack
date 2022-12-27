@@ -112,12 +112,13 @@ def get_bias_dark_flat():
     flat_suffix = '-flat.fits'
     
     if fix_bias==True:
-        bias = read_frame_fits(bias_file)
+        print(bias_file)
+        bias, date_str = read_frame_fits(bias_file, do_fix=False)
     else:
         bias = 0.
 
     if fix_dark==True:
-        dark = read_frame_fits(dark_file)
+        dark, date_str = read_frame_fits(dark_file, do_fix=False)
         if fix_bias==True:
             dark = dark - bias
     else:
@@ -127,7 +128,7 @@ def get_bias_dark_flat():
         flat = {'L':None}
         for chn in flat_channels:
             file_flat = os.path.join(dir_flat, chn) + flat_suffix
-            frame = read_frame_fits(file_flat)
+            frame, date_str = read_frame_fits(file_flat, do_fix=False)
             if fix_bias==True:
                 frame = frame - bias
             if fix_dark==True:
@@ -141,22 +142,25 @@ def get_bias_dark_flat():
 
 # read fits or raw file and convert to bin so it can be used by
 # multiprocessing returns: frame, time, date type
-def read_frame_fits(file):
+def read_frame_fits(file, do_fix=True):
     with fits.open(file) as hdu:
         page_num = len(hdu)-1
         frame = hdu[page_num].data
         frame = frame.astype(working_precision)
-        hdr = hdu[page_num].header
+        
         try:
+            hdr = hdu[page_num].header
             date_str = hdr[date_tag]
         except:
             date_str = None
-        if fix_bias==True:
-            frame = frame - bias
-        if fix_dark==True:
-            frame = decorr(dark, frame)
-        if fix_flat==True:
-            frame = frame / flat[get_channel(file)]
+
+        if do_fix:
+            if fix_bias==True:
+                frame = frame - bias
+            if fix_dark==True:
+                frame = decorr(dark, frame)
+            if fix_flat==True:
+                frame = frame / flat[get_channel(file)]
     return frame, date_str
 
 def read_frame_raw(file):
@@ -516,6 +520,9 @@ def normalize_frame(frame, vmin, vmax):
 
 
 
+
+
+
 ##############################################################
 # Do the following:
 # 1. Align the frames using the initial reference frame.
@@ -610,9 +617,9 @@ else:
 # information
 if __name__ == '__main__':
     if mode=="fits":
-        frame, _ = read_frame_fits(file_lst[0]) 
+        frame, date_str = read_frame_fits(file_lst[0]) 
     else:
-        frame, _ = read_frame_raw(file_lst[0]) 
+        frame, date_str = read_frame_raw(file_lst[0]) 
     info_lst = smm.ShareableList([frame.dtype.name, np.shape(frame)[0], np.shape(frame)[1]])
 
 raw_data_type, n1, n2 = info_lst[0], info_lst[1], info_lst[2]
@@ -779,8 +786,6 @@ if __name__ == '__main__':
         else:
             wid = wid1
 
-    print(np.mean(frames_working[0,:,:]))
-
     print("****************************************************")
     print("Alignment done in %4i rounds, time cost:                 %9.2f" %(nar+1, time.time()-tst_tot))
     print("Frame %4i is the final reference frame." %(wid))
@@ -789,9 +794,10 @@ if __name__ == '__main__':
 
     # exclude the low quality frames
     n_bad = int(n_files*bad_fraction)
-    thr = hp.nsmallest(n_bad, w)[n_bad-1]
-    if thr<0: thr = 0
-    w = np.where(w <= thr, 0, w)
+    if n_bad > 0:
+        thr = hp.nsmallest(n_bad, w)[n_bad-1]
+        if thr<0: thr = 0
+        w = np.where(w <= thr, 0, w)
     w = w / np.sum(w)
 
     if align_save==True:
@@ -802,7 +808,7 @@ if __name__ == '__main__':
         for i in range(n_files):
             if w[i] > 0:
                 file_aligned = os.path.join(align_dir, file_lst[i])
-                write_frame_fits([frames_working[i,:,:].astype(raw_data_type)], file_aligned, overwrite=True)
+                write_frame_fits(frames_working[i,:,:].astype(working_precision), file_aligned, overwrite=True)
 
     # stack the frames with weights.
     tst = time.time()
@@ -812,7 +818,7 @@ if __name__ == '__main__':
     frame_stacked = normalize_frame( frame_stacked, 0, vmax_global )
 
     file_stacked = os.path.join(fullpath,output_dir,final_file_fits)
-    write_frame_fits([frame_stacked.astype(raw_data_type)], file_stacked, overwrite=True)
+    write_frame_fits(frame_stacked.astype(working_precision), file_stacked, overwrite=True)
 
     print("Stacked frame obtained from %4i/%4i frames, time cost.    %9.2f" 
         %(n_files-n_bad, n_files, time.time()-tst))
