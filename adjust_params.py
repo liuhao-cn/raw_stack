@@ -22,12 +22,21 @@ rgb_nbins     = 8192
 gamma         = [8, 64, 24]
 gauss_sigma   = 0.0
 
+# cut very low and very high values at a given percentage, for the case
+# without histogram equalization.
+edge_cut0     = [0.05, 0.05, 0.05]
+edge_cut1     = [0.95, 0.95, 0.95]
+
+# scale the color channels with given factors, for the case without
+# histogram equalization.
+scaling_fac   = [20.00, 10.00, 10.00]
+
 multi_sess   = False
 console_mode = True
 
 # the stack mode can be color, LHSO, HSO, LRGB, RGB
 stack_mode = 'HSO'
-hist_eq = True
+hist_eq = False
 
 # pattern (prefix) of the channel name
 chn_pattern = '_Bin2_'

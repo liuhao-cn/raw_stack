@@ -1,5 +1,4 @@
-import sys
-import cv2, os, imageio, time, re
+import sys, cv2, os, imageio, time, re
 
 import numpy as np
 import pandas as pd
@@ -126,25 +125,35 @@ def hist_equal_gamma(i):
     rgb_corrected[:,:,i] = buff
 
 
-# cut the edge values by histogram
-def cut_edge_values(i):
+# cut the edge values, do scaling, and modify the gamma values.
+def cut_scale_gamma(i):
     global rgb, rgb_corrected
     # get image histogram
     array = rgb[:,:,i].flatten()
     hist, bins = np.histogram(array, par.rgb_nbins, density=True)
     cdf = hist.cumsum()
     cdf = cdf/np.amax(cdf)
+    # find the edge values
     for ind in range(par.rgb_nbins):
-        if cdf[ind]>0.05:
+        if cdf[ind]>par.edge_cut0[i]:
             vv0 = bins[ind]
             break
     for ind in range(par.rgb_nbins):
-        if cdf[ind]>0.95:
+        if cdf[ind]>par.edge_cut1[i]:
             vv1 = bins[ind]
             break
-    array[array<vv0] = vv0
-    array[array>vv1] = vv1
-    array = norm_arr(array, par.rgb_vmin, par.rgb_vmax)
+    # normalize the array
+    upper_lim = (vv1 - vv0)*1.
+    array = (array - vv0)/upper_lim
+    array[array<0] = 0
+    array[array>1] = 1
+    # gamma correction
+    array = array**(par.gamma[i])
+    # further scaling and normalization
+    array = array * par.scaling_fac[i] * upper_lim
+    print(upper_lim, par.scaling_fac[i], vv0, vv1)
+    array[array>par.rgb_vmax] = par.rgb_vmax
+    # save the result
     rgb_corrected[:,:,i] = array.reshape(n1, n2)
 
 
@@ -173,7 +182,7 @@ vertical_clip   = [par.vc0, par.vc1]
 horizontal_clip = [par.hc0, par.hc1]
 
 gamma_str = str(par.gamma[0]).format("4.4i")+'-'+str(par.gamma[1]).format("4.4i")+'-'+str(par.gamma[2]).format("4.4i")
-file_tif  = os.path.join(par.working_dir, "final gamma"+gamma_str+".tiff")
+file_tif  = os.path.join(par.working_dir, "final_gamma"+gamma_str+".tiff")
 
 print("Working directory:         %s" %(par.working_dir))
 print("gamma:                     %s" %(par.gamma))
@@ -181,28 +190,25 @@ print("gamma:                     %s" %(par.gamma))
 # read the stacked frame and make sure the values are all positive
 if par.stack_mode.lower() == 'color':
     frame_stacked = ave_by_channel('')
-elif par.stack_mode.lower() == 'lrgb':
+else:
     chn_L = ave_by_channel('L')
     chn_R = ave_by_channel('R')
     chn_G = ave_by_channel('G')
     chn_B = ave_by_channel('B')
-    frame_stacked = comb_channels(chn_R, chn_G, chn_B, l=chn_L)
-elif par.stack_mode.lower() == 'lhso':
-    chn_L = ave_by_channel('L')
-    chn_R = ave_by_channel('H')
-    chn_G = ave_by_channel('S')
-    chn_B = ave_by_channel('O')
-    frame_stacked = comb_channels(chn_R, chn_G, chn_B, l=chn_L)
-elif par.stack_mode.lower() == 'rgb':
-    chn_R = ave_by_channel('R')
-    chn_G = ave_by_channel('G')
-    chn_B = ave_by_channel('B')
-    frame_stacked = comb_channels(chn_R, chn_G, chn_B)
-elif par.stack_mode.lower() == 'hso':
-    chn_R = ave_by_channel('H')
-    chn_G = ave_by_channel('S')
-    chn_B = ave_by_channel('O')
-    frame_stacked = comb_channels(chn_R, chn_G, chn_B)
+    chn_H = ave_by_channel('H')
+    chn_S = ave_by_channel('S')
+    chn_O = ave_by_channel('O')
+    if   par.stack_mode.upper() == 'LRGB':    
+        frame_stacked = comb_channels(chn_R, chn_G, chn_B, l=chn_L)
+    elif par.stack_mode.upper() == 'LHSO':
+        frame_stacked = comb_channels(chn_H, chn_S, chn_O, l=chn_L)
+    elif par.stack_mode.upper() == 'RGB':
+        frame_stacked = comb_channels(chn_R, chn_G, chn_B)
+    elif par.stack_mode.upper() == 'HSO':
+        frame_stacked = comb_channels(chn_H, chn_S, chn_O)
+    else:
+        print('Unknown stack mode, should be one of: color, LRGB, RGB, LHSO or HSO!')
+        sys.exit()
 
 # record the frame shape
 shape = frame_stacked.shape
@@ -241,7 +247,7 @@ if par.multi_sess == True:
                 output = pool.map(hist_equal_gamma, range(3))
         else:
             with mp.Pool(3) as pool:
-                output = pool.map(cut_edge_values, range(3))
+                output = pool.map(cut_scale_gamma, range(3))
 else:
     if par.stack_mode.lower() == 'color':
         rgb = cv2.cvtColor(frame_stacked, par.bayer_matrix_format)
@@ -255,7 +261,7 @@ else:
     else:
         rgb_corrected = rgb*0
         for i in range(3):
-            cut_edge_values(i)
+            cut_scale_gamma(i)
 
 print("Color correction done,                time cost: %9.2f" %(time.time()-tst) )
 print("Current color correction parameters:  gamma  = %s" %(gamma_str) )
