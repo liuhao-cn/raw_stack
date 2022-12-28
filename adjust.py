@@ -151,7 +151,6 @@ def cut_scale_gamma(i):
     array = array**(par.gamma[i])
     # further scaling and normalization
     array = array * par.scaling_fac[i] * upper_lim
-    print(upper_lim, par.scaling_fac[i], vv0, vv1)
     array[array>par.rgb_vmax] = par.rgb_vmax
     # save the result
     rgb_corrected[:,:,i] = array.reshape(n1, n2)

@@ -19,17 +19,17 @@ hc1 = 1.0
 
 down_samp_fac = 1.0
 rgb_nbins     = 8192
-gamma         = [8, 64, 24]
+gamma         = [64, 128, 128]
 gauss_sigma   = 0.0
 
-# cut very low and very high values at a given percentage, for the case
-# without histogram equalization.
+# cut very low and very high values at a given percentage, only for the
+# case without histogram equalization.
 edge_cut0     = [0.05, 0.05, 0.05]
 edge_cut1     = [0.95, 0.95, 0.95]
 
-# scale the color channels with given factors, for the case without
+# scale the color channels with given factors, only for the case without
 # histogram equalization.
-scaling_fac   = [20.00, 10.00, 10.00]
+scaling_fac   = [20.00, 5.00, 5.00]
 
 multi_sess   = False
 console_mode = True
