@@ -85,8 +85,6 @@ def get_bias_dark_flat():
             frame, date_str = read_frame_fits(file_flat, do_fix=False)
             if par.fix_bias==True:
                 frame = frame - bias
-            if par.fix_dark==True:
-                frame = decorr(dark, frame)
             frame = frame / np.amax(frame)
             flat[chn] = frame.copy()
     else:
@@ -134,9 +132,17 @@ def write_frame_fits(frame, file, cards=None, overwrite=True):
     hdu_list.writeto(file, overwrite=overwrite)
     hdu_list.close()
 
-def decorr(x, y):
-    res = linregress(x.flatten(), y.flatten())
-    return y - x*res.slope
+def decorr(x, y, message=False):
+    xx = (x-np.mean(x)).flatten()
+    yy = y.flatten()
+    res = linregress(xx, yy)
+    if res.slope>0:
+        f = res.slope
+    else:
+        f = -res.slope
+    if message:
+        print(f)
+    return (yy - xx*f).reshape(y.shape)
 
 
 ##############################################################
@@ -508,6 +514,9 @@ if par.console == True:
     print("Working directory:         %s" %(par.working_dir))
     print("Input file extension:      %s" %(par.extension))
     print("Number of processes limit: %s" %(nproc_max))
+    print("Fix bias =                 %s" %(par.fix_bias))
+    print("Fix dark =                 %s" %(par.fix_dark))
+    print("Fix flat =                 %s" %(par.fix_flat))
 else:
     # In non-console mode, improve the display effect of Jupyter notebook
     from IPython.core.display import display, HTML

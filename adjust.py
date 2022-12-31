@@ -144,6 +144,7 @@ def cut_scale_gamma(i):
             break
     # normalize the array
     upper_lim = (vv1 - vv0)*1.
+    print(upper_lim)
     array = (array - vv0)/upper_lim
     array[array<0] = 0
     array[array>1] = 1
@@ -185,6 +186,7 @@ file_tif  = os.path.join(par.working_dir, "final_gamma"+gamma_str+".tiff")
 
 print("Working directory:         %s" %(par.working_dir))
 print("gamma:                     %s" %(par.gamma))
+print("hist-equalization =        %s" %(par.hist_eq))
 
 # read the stacked frame and make sure the values are all positive
 if par.stack_mode.lower() == 'color':
