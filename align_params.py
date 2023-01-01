@@ -89,7 +89,7 @@ fix_flat = True
 
 # time for the light and dark frames. The scaling factor of the dark frame is
 # frame time/ dark time
-frame_time = 300.
+frame_time = 8.
 dark_time = 180.
 
 bias_file = '/home/hao/astro/bias-dark-flat/294mm-pro-bin2/bias-master.fits'
