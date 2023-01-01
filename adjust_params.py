@@ -19,7 +19,7 @@ hc1 = 1.0
 
 down_samp_fac = 1.0
 rgb_nbins     = 8192
-gamma         = [4, 4, 4]
+gamma         = [2, 2, 2]
 gauss_sigma   = 0.0
 
 # cut very low and very high values at a given percentage, only for the
@@ -35,7 +35,7 @@ multi_sess   = False
 console_mode = True
 
 # the stack mode can be color, LHSO, HSO, LRGB, RGB
-stack_mode = 'RGB'
+stack_mode = 'HSO'
 hist_eq = True
 
 # pattern (prefix) of the channel name
