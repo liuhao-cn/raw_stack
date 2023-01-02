@@ -30,7 +30,7 @@ edge_cut1     = [0.95, 0.95, 0.95]
 # histogram equalization.
 scaling_fac   = [40.00, 40.00, 40.00]
 
-multi_sess   = False
+parallel     = False
 console_mode = True
 
 # the stack mode can be color, LHSO, HSO, LRGB, RGB

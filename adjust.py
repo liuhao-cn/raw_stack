@@ -98,14 +98,8 @@ def cut_scale_gamma(i):
     cdf = hist.cumsum()
     cdf = cdf/np.amax(cdf)
     # find the edge values
-    for ind in range(par.rgb_nbins):
-        if cdf[ind]>par.edge_cut0[i]:
-            vv0 = bins[ind]
-            break
-    for ind in range(par.rgb_nbins):
-        if cdf[ind]>par.edge_cut1[i]:
-            vv1 = bins[ind-1]
-            break
+    vv0 = bins[np.argmin(np.abs(cdf-par.edge_cut0[i]))]
+    vv1 = bins[np.argmin(np.abs(cdf-par.edge_cut1[i]))]
     # normalize the array to 0~1
     upper_lim = (vv1 - vv0)*1.
     array = (array - vv0)/upper_lim
@@ -153,6 +147,7 @@ file_tif  = os.path.join(par.working_dir, "final_gamma"+gamma_str+".tiff")
 
 print("Working directory  = %s"      %(par.working_dir))
 print("Gamma              = %s"      %(par.gamma))
+print("Parallel           = %s"      %(par.parallel))
 print("Hist-equalization  = %s"      %(par.hist_eq))
 print("Stack color mode   = %s"      %(par.stack_mode))
 print("Horizontal reverse = %s"      %(par.hori_inv))
@@ -198,12 +193,15 @@ print("                      vertical = (%6i, %6i)" %(v1, v2) )
 
 # convert stacked frame to linear rgb values (only handle the Bayer matrix)
 tst = time.time()
-if par.multi_sess == True:
+if par.parallel == True:
     # start the shared memory manager
     smm = SharedMemoryManager()
     smm.start()
 
-    shm_rgb = smm.SharedMemory(frame_stacked.size*3*8)
+    if par.stack_mode.lower() == 'color':
+        shm_rgb = smm.SharedMemory(frame_stacked.size*3*8)
+    else:
+        shm_rgb = smm.SharedMemory(frame_stacked.size*8)
     rgb = np.frombuffer(shm_rgb.buf, dtype=np.float64).reshape(n1, n2, 3)
 
     shm_rgb_corrected = smm.SharedMemory(rgb.size*rgb.itemsize)
@@ -262,7 +260,7 @@ if par.down_samp_fac>1:
         buff = resample(buff, n2s, axis=1)
         rgb_final[:,:,i] = norm_arr(buff, par.rgb_vmin, par.rgb_vmax)
 else:
-    rgb_final = rgb_corrected
+    rgb_final = rgb_corrected.copy()
 
 
 # save the 48-bit color image
@@ -277,6 +275,6 @@ if par.console_mode == False:
     plt.imshow(np.uint8(rgb_final/256))
     plt.show()
 
-if par.multi_sess == True:
+if par.parallel == True:
     rgb, rgb_corrected = 0, 0
     smm.shutdown()
