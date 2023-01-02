@@ -2,7 +2,6 @@ import cv2
 import numpy as np
 
 working_dir  = '/home/hao/astro/raw/2022-07-07_21_27_18Z/output/aligned/'
-file_stacked = 'frame_stacked.fits'
 extension    = 'fit'
 
 rgb_vmin     = 0
@@ -35,7 +34,7 @@ multi_sess   = False
 console_mode = True
 
 # the stack mode can be color, LHSO, HSO, LRGB, RGB
-stack_mode = 'RGB'
+stack_mode = 'HSO'
 hist_eq = True
 
 # pattern (prefix) of the channel name

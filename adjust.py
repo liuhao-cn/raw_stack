@@ -24,6 +24,7 @@ def read_channel_name(filename):
     chn_name = res.group(0)[name_loc]
     return chn_name
 
+
 # read frames with the given channel and return the average.
 def ave_by_channel(channel):
     i = 0
@@ -45,6 +46,7 @@ def ave_by_channel(channel):
     else:
         return frame/i
 
+
 def comb_channels(r, g, b, l=None):
     shape = r.shape
     n1, n2 = shape[0], shape[1]
@@ -59,50 +61,12 @@ def comb_channels(r, g, b, l=None):
         frame[:,:,2] = b
     return frame
 
-# define the subroutines
-def rfft2_freq(n1, n2):
-    n2r = n2//2 + 1
-    f1 = np.repeat(np.fft.fftfreq(n1), n2r).reshape(n1,n2r)
-    f2 = np.repeat(np.fft.rfftfreq(n2),n1).reshape(n2r,n1).transpose()
-    f = np.sqrt(f1**2 + f2**2)
-    return f
-
-def lowpass_2d(array, ratio):
-    n1 = array.shape[0]
-    n2 = array.shape[1]
-    f2 = rfft2_freq(n1, n2)
-    f2 = f2/np.amax(f2)
-    mask = np.where(f2>ratio, 0, 1)
-    array_hp = np.fft.irfft2(np.fft.rfft2(array)*mask)
-    return array_hp
-
-def highpass_2d(array, ratio):
-    n1 = array.shape[0]
-    n2 = array.shape[1]
-    f2 = rfft2_freq(n1, n2)
-    f2 = f2/np.amax(f2)
-    mask = np.where(f2<ratio, 0, 1)
-    array_hp = np.fft.irfft2(np.fft.rfft2(array)*mask)
-    array_hp = array_hp - np.amin(array_hp)
-    return array_hp
-
-# simplified 2D wiener filter that assume the highest "fraction" of FFT spectrum is dominated by 
-def wiener2D_simple(array, frac):
-    shape = array.shape
-    n1, n2 = shape[0], shape[1]
-    df = np.fft.fft2(array)
-    amp = np.abs(df)**2
-    na = hq.nsmallest(int(n1*n2*frac), list(amp.flatten()))[-1]
-    amp = np.where(amp<na, na, amp)
-    fac = (amp-na)/amp
-    data_filt = np.fft.ifft2(df*fac)
-    data_filt = np.real(data_filt)
-    return data_filt
 
 def read_fits(file):
     with fits.open(file) as hdu:
         frame = hdu[len(hdu)-1].data
     return frame
+
 
 # do histogram equalization and gamma correction for one channel
 def hist_equal_gamma(i):
@@ -140,11 +104,10 @@ def cut_scale_gamma(i):
             break
     for ind in range(par.rgb_nbins):
         if cdf[ind]>par.edge_cut1[i]:
-            vv1 = bins[ind]
+            vv1 = bins[ind-1]
             break
-    # normalize the array
+    # normalize the array to 0~1
     upper_lim = (vv1 - vv0)*1.
-    print(upper_lim)
     array = (array - vv0)/upper_lim
     array[array<0] = 0
     array[array>1] = 1
@@ -152,6 +115,7 @@ def cut_scale_gamma(i):
     array = array**(par.gamma[i])
     # further scaling and normalization
     array = array * par.scaling_fac[i] * upper_lim
+    array[array<par.rgb_vmin] = par.rgb_vmin
     array[array>par.rgb_vmax] = par.rgb_vmax
     # save the result
     rgb_corrected[:,:,i] = array.reshape(n1, n2)
@@ -161,22 +125,25 @@ def norm_arr(array, vmin, vmax):
     x = array.copy()
     xmin = np.amin(x)
     xmax = np.amax(x)
-    x = (x-xmin)/(xmax-xmin)*(vmax-vmin) + vmin
+    if xmin != xmax:
+        x = (x-xmin)/(xmax-xmin)*(vmax-vmin) + vmin
     return x
 
 
 if len(sys.argv)>1:
     par.working_dir = sys.argv[1]
 if len(sys.argv)>2:
-    par.gamma = float(sys.argv[2])
-if len(sys.argv)>3:
-    par.vc0 = float(sys.argv[3])
-if len(sys.argv)>4:
-    par.vc1 = float(sys.argv[4])
+    par.gamma[0] = float(sys.argv[2])
+    par.gamma[1] = float(sys.argv[3])
+    par.gamma[2] = float(sys.argv[4])
 if len(sys.argv)>5:
-    par.hc0 = float(sys.argv[5])
+    par.vc0 = float(sys.argv[5])
 if len(sys.argv)>6:
-    par.hc1 = float(sys.argv[6])
+    par.vc1 = float(sys.argv[6])
+if len(sys.argv)>7:
+    par.hc0 = float(sys.argv[7])
+if len(sys.argv)>8:
+    par.hc1 = float(sys.argv[8])
 
 vertical_clip   = [par.vc0, par.vc1]
 horizontal_clip = [par.hc0, par.hc1]
@@ -184,9 +151,14 @@ horizontal_clip = [par.hc0, par.hc1]
 gamma_str = str(par.gamma[0]).format("4.4i")+'-'+str(par.gamma[1]).format("4.4i")+'-'+str(par.gamma[2]).format("4.4i")
 file_tif  = os.path.join(par.working_dir, "final_gamma"+gamma_str+".tiff")
 
-print("Working directory:         %s" %(par.working_dir))
-print("gamma:                     %s" %(par.gamma))
-print("hist-equalization =        %s" %(par.hist_eq))
+print("Working directory  = %s"      %(par.working_dir))
+print("Gamma              = %s"      %(par.gamma))
+print("Hist-equalization  = %s"      %(par.hist_eq))
+print("Stack color mode   = %s"      %(par.stack_mode))
+print("Horizontal reverse = %s"      %(par.hori_inv))
+print("Vertical reverse   = %s"      %(par.vert_inv))
+print("Horizontal range   = %s - %s" %(par.hc0, par.hc1))
+print("Vertical range     = %s - %s" %(par.vc0, par.vc1))
 
 # read the stacked frame and make sure the values are all positive
 if par.stack_mode.lower() == 'color':
@@ -221,7 +193,7 @@ h1, h2 = int((n2*horizontal_clip[0])//2*2), int((n2*horizontal_clip[1])//2*2)
 frame_stacked = frame_stacked[v1:v2, h1:h2]
 n1, n2 = v2-v1, h2-h1
 print("Original size:    (hori, vert) = (%6i, %6i)" %(n2, n1) )
-print("Work with subframe: horizontal = (%6i, %6i)" %(h1, h2) )
+print("Working subframe:   horizontal = (%6i, %6i)" %(h1, h2) )
 print("                      vertical = (%6i, %6i)" %(v1, v2) )
 
 # convert stacked frame to linear rgb values (only handle the Bayer matrix)
@@ -264,12 +236,12 @@ else:
         for i in range(3):
             cut_scale_gamma(i)
 
-print("Color correction done,                time cost: %9.2f" %(time.time()-tst) )
-print("Current color correction parameters:  gamma  = %s" %(gamma_str) )
+print("Color correction done,    time cost: %9.2f" %(time.time()-tst) )
 
 
 # Gaussian smoothing
 if par.gauss_sigma != 0:
+    print("Running %s pixel Gaussian smoothing" %(par.gauss_sigma))
     for i in range(3):
         rgb_corrected[:,:,i] = ndimage.gaussian_filter(rgb_corrected[:,:,i], sigma=par.gauss_sigma)
 
@@ -295,7 +267,7 @@ else:
 
 # save the 48-bit color image
 imageio.imsave(file_tif, rgb_final.astype(par.raw_data_type))
-
+print("Final image saved as %s" %(file_tif))
 
 # show the image
 if par.console_mode == False:

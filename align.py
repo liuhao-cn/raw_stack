@@ -47,7 +47,6 @@ else:
 vmax_global = 2**par.adc_digit_limit - 1
 
 
-
 ##############################################################
 # Fits related routines:
 # 
@@ -61,37 +60,6 @@ def get_channel(filename, chn_pat=par.chn_pattern):
     chn_name = res.group(0)[name_loc]
     return chn_name
 
-# read the bias, dark and flat frames. Note that the flat file should be in
-# par.dir_flat and be named like 'L-flat.fits', 'H-flat.fits'...
-def get_bias_dark_flat():
-    flat_suffix = '-flat.fits'
-    
-    if par.fix_bias==True:
-        bias, date_str = read_frame_fits(par.bias_file, do_fix=False)
-    else:
-        bias = 0.
-
-    if par.fix_dark==True:
-        dark, date_str = read_frame_fits(par.dark_file, do_fix=False)
-        if par.fix_bias==True:
-            dark = dark - bias
-            dark = dark * par.frame_time / par.dark_time
-    else:
-        dark = 0.
-
-    if par.fix_flat==True:
-        flat = {'L':None}
-        for chn in par.flat_channels:
-            file_flat = os.path.join(par.dir_flat, chn) + flat_suffix
-            frame, date_str = read_frame_fits(file_flat, do_fix=False)
-            if par.fix_bias==True:
-                frame = frame - bias
-            frame = frame / np.amax(frame)
-            flat[chn] = frame.copy()
-    else:
-        flat = 1.
-    
-    return bias, dark, flat
 
 # read fits or raw file and convert to bin so it can be used by
 # multiprocessing returns: frame, time, date type
@@ -116,10 +84,44 @@ def read_frame_fits(file, do_fix=True):
                 frame = frame / flat[get_channel(file)]
     return frame, date_str
 
+
 def read_frame_raw(file):
     with rawpy.imread(file) as raw:
         frame = raw.raw_image.copy()
     return frame, None
+
+
+# read the bias, dark and flat frames. Note that the flat file should be in
+# par.dir_flat and be named like 'L-flat.fits', 'H-flat.fits'...
+def get_bias_dark_flat():
+    if par.fix_bias==True:
+        bias, _ = read_frame_fits(par.bias_file, do_fix=False)
+    else:
+        bias = 0.
+
+    if par.fix_dark==True:
+        dark, _ = read_frame_fits(par.dark_file, do_fix=False)
+        if par.fix_bias==True:
+            dark = dark - bias
+        dark = dark * par.frame_time / par.dark_time
+    else:
+        dark = 0.
+
+    if par.fix_flat==True:
+        flat = {'L':None}
+        for chn in par.flat_channels:
+            file_flat = os.path.join(par.dir_flat, chn) + par.flat_suffix
+            frame, _ = read_frame_fits(file_flat, do_fix=False)
+            if par.fix_bias==True:
+                frame = frame - bias
+            frame = frame / np.amax(frame)
+            flat[chn] = frame.copy()
+            print("Flat frame read in for channel %s." %(chn))
+    else:
+        flat = 1.
+    
+    return bias, dark, flat
+
 
 # simple program to write array to fits file
 def write_frame_fits(frame, file, cards=None, overwrite=True):
@@ -133,17 +135,12 @@ def write_frame_fits(frame, file, cards=None, overwrite=True):
     hdu_list.writeto(file, overwrite=overwrite)
     hdu_list.close()
 
+
 def decorr(x, y, message=False):
-    xx = (x-np.mean(x)).flatten()
-    yy = y.flatten()
-    res = linregress(xx, yy)
-    if res.slope>0:
-        f = res.slope
-    else:
-        f = -res.slope
-    if message:
-        print(f)
-    return (yy - xx*f).reshape(y.shape)
+    res = linregress(x.flatten(), y.flatten())
+    if res.slope<0:
+        print("Warning: the fitting slope is less than zero!")
+    return y - x*res.slope
 
 
 ##############################################################
@@ -156,6 +153,7 @@ def rfft2_freq(n1, n2):
     f2 = np.repeat(fft.rfftfreq(n2),n1).reshape(n2r,n1).transpose()
     f = np.sqrt(f1**2 + f2**2)
     return f
+
 
 # wrapper of the frame-to-fft process, including pre-processing:
 #
@@ -188,7 +186,6 @@ def frame2fft(frame):
     return frame_fft
 
 
-
 ##############################################################
 # Alignment routines:
 ##############################################################
@@ -201,6 +198,7 @@ def periodical_norm(x, period):
     x1 = ang_rad/2/np.pi*period
     return x1
 
+
 # compute the mean of periodical data
 def periodical_mean(x, period):
     ang_rad = x/period*2*np.pi
@@ -209,6 +207,7 @@ def periodical_mean(x, period):
     ang_mean = np.arctan2(sx, cx)
     x_mean = ang_mean/2/np.pi*period
     return x_mean
+
 
 # get or put a Bayer-frame
 def get_Bayerframe(frame, index):
@@ -219,6 +218,7 @@ def get_Bayerframe(frame, index):
     subframe = (frame[:,jj,:,kk]).reshape(int(n1/2), int(n2/2))
     frame = frame.reshape(n1, n2)
     return subframe
+
 
 def put_Bayerframe(frame, subframe, index):
     kk = index % 2
@@ -266,6 +266,7 @@ def fix_extrema(i):
             frame = put_Bayerframe(frame, frame1, jj)
 
         frames_working[i,:,:] = frame.reshape(n1, n2)
+
 
 # align a frame to the reference frame, do it for the four Bayer components
 # separately so the color dispersion will be corrected at the same time.
@@ -326,6 +327,7 @@ def align_frames(i):
         return i, s1.flatten(), s2.flatten()
     else:
         return i, s1, s2
+
 
 # parse the offsets from the starmap() output list
 def parse_offsets(out_list):
@@ -512,14 +514,17 @@ if par.console == True:
     if len(sys.argv)>4:
         nproc_max = int(sys.argv[4])
     
-    print("Working directory:         %s" %(par.working_dir))
-    print("Input file extension:      %s" %(par.extension))
-    print("Number of processes limit: %s" %(nproc_max))
-    print("Fix bias =                 %s" %(par.fix_bias))
-    print("Fix dark =                 %s" %(par.fix_dark))
-    print("Fix flat =                 %s" %(par.fix_flat))
-    print("Frame time =               %s" %(par.frame_time))
-    print("Dark time =                %s" %(par.dark_time))
+    print("Working directory    =     %s" %(par.working_dir))
+    print("Input file extension =     %s" %(par.extension))
+    print("Number of processes  =     %s" %(nproc_max))
+    print("Alignment mode       =     %s" %(par.align_color_mode))
+    print("Bad file fraction    =     %s" %(par.bad_fraction))
+    print("Output dir           =     %s" %(par.output_dir))
+    print("Fix bias             =     %s" %(par.fix_bias))
+    print("Fix dark             =     %s" %(par.fix_dark))
+    print("Fix flat             =     %s" %(par.fix_flat))
+    print("Frame time           =     %s" %(par.frame_time))
+    print("Dark time            =     %s" %(par.dark_time))
 else:
     # In non-console mode, improve the display effect of Jupyter notebook
     from IPython.core.display import display, HTML
