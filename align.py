@@ -103,6 +103,7 @@ def get_bias_dark_flat():
         dark, _ = read_frame_fits(par.dark_file, do_fix=False)
         if par.fix_bias==True:
             dark = dark - bias
+            dark = dark - np.amin(dark)
         dark = dark * par.frame_time / par.dark_time
     else:
         dark = 0.
@@ -525,6 +526,7 @@ if par.console == True:
     print("Fix flat             =     %s" %(par.fix_flat))
     print("Frame time           =     %s" %(par.frame_time))
     print("Dark time            =     %s" %(par.dark_time))
+    print("Flat frame dir       =     %s" %(par.dir_flat))
 else:
     # In non-console mode, improve the display effect of Jupyter notebook
     from IPython.core.display import display, HTML

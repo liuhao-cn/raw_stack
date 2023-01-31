@@ -41,14 +41,16 @@ def ave_by_channel(channel):
                 frame = frame + read_fits(file)*1.
                 i = i+1
     print('Number of files for channel %6s: %5i' %(channel, i))
+
     if i==0:
         return 0
     else:
-        return frame/i
+        frame = frame/i
+        return frame
 
 
 def comb_channels(r, g, b, l=None):
-    shape = r.shape
+    shape = g.shape
     n1, n2 = shape[0], shape[1]
     frame = np.zeros([n1, n2, 3])
     if len(np.shape(l)) != 0:
@@ -79,6 +81,10 @@ def hist_equal_gamma(i):
     bins = bins[0:par.rgb_nbins-1]
     cdf = hist.cumsum()
     cdf = cdf/np.amax(cdf)
+    # find the edge values
+    vv0 = bins[np.argmin(np.abs(cdf-par.edge_cut0[i]))]
+    vv1 = bins[np.argmin(np.abs(cdf-par.edge_cut1[i]))]
+    bins[bins<vv0] = vv0
     # use linear interpolation of cdf to find new pixel values
     array = np.interp(array, bins, cdf)
     if par.gamma[i] != 1:
@@ -86,11 +92,11 @@ def hist_equal_gamma(i):
         cdf1 = x1**(par.gamma[i])
         array = np.interp(array, x1, cdf1)
     buff = norm_arr(array.reshape(n1, n2), par.rgb_vmin, par.rgb_vmax)
-    rgb_corrected[:,:,i] = buff
+    rgb_corrected[:,:,i] = buff.copy()
 
 
 # cut the edge values, do scaling, and modify the gamma values.
-def cut_scale_gamma(i):
+def cut_and_gamma(i):
     global rgb, rgb_corrected
     # get image histogram
     array = rgb[:,:,i].flatten()
@@ -106,11 +112,10 @@ def cut_scale_gamma(i):
     array[array<0] = 0
     array[array>1] = 1
     # gamma correction
-    array = array**(par.gamma[i])
-    # further scaling and normalization
-    array = array * par.scaling_fac[i] * upper_lim
-    array[array<par.rgb_vmin] = par.rgb_vmin
-    array[array>par.rgb_vmax] = par.rgb_vmax
+    array = array**(par.gamma[i])*(par.rgb_vmax - par.rgb_vmin)
+    # # further scaling and normalization
+    # array[array<par.rgb_vmin] = par.rgb_vmin
+    # array[array>par.rgb_vmax] = par.rgb_vmax
     # save the result
     rgb_corrected[:,:,i] = array.reshape(n1, n2)
 
@@ -170,10 +175,14 @@ else:
         frame_stacked = comb_channels(chn_R, chn_G, chn_B, l=chn_L)
     elif par.stack_mode.upper() == 'LHSO':
         frame_stacked = comb_channels(chn_H, chn_S, chn_O, l=chn_L)
+    elif par.stack_mode.upper() == 'LSHO':
+        frame_stacked = comb_channels(chn_S, chn_H, chn_O, l=chn_L)
     elif par.stack_mode.upper() == 'RGB':
         frame_stacked = comb_channels(chn_R, chn_G, chn_B)
     elif par.stack_mode.upper() == 'HSO':
         frame_stacked = comb_channels(chn_H, chn_S, chn_O)
+    elif par.stack_mode.upper() == 'SHO':
+        frame_stacked = comb_channels(chn_S, chn_H, chn_O)
     else:
         print('Unknown stack mode, should be one of: color, LRGB, RGB, LHSO or HSO!')
         sys.exit()
@@ -187,9 +196,8 @@ v1, v2 = int((n1*vertical_clip[0])//2*2), int((n1*vertical_clip[1])//2*2)
 h1, h2 = int((n2*horizontal_clip[0])//2*2), int((n2*horizontal_clip[1])//2*2)
 frame_stacked = frame_stacked[v1:v2, h1:h2]
 n1, n2 = v2-v1, h2-h1
-print("Original size:    (hori, vert) = (%6i, %6i)" %(n2, n1) )
-print("Working subframe:   horizontal = (%6i, %6i)" %(h1, h2) )
-print("                      vertical = (%6i, %6i)" %(v1, v2) )
+print("Original size:    (hori, vert) = (%14i, %14i)" %(n2, n1) )
+print("Working subframe: (hori, vert) = (%6i ~%6i, %6i ~%6i)" %(h1, h2, v1, v2) )
 
 # convert stacked frame to linear rgb values (only handle the Bayer matrix)
 tst = time.time()
@@ -218,7 +226,7 @@ if par.parallel == True:
                 output = pool.map(hist_equal_gamma, range(3))
         else:
             with mp.Pool(3) as pool:
-                output = pool.map(cut_scale_gamma, range(3))
+                output = pool.map(cut_and_gamma, range(3))
 else:
     if par.stack_mode.lower() == 'color':
         rgb = cv2.cvtColor(frame_stacked, par.bayer_matrix_format)
@@ -232,7 +240,7 @@ else:
     else:
         rgb_corrected = rgb*0
         for i in range(3):
-            cut_scale_gamma(i)
+            cut_and_gamma(i)
 
 print("Color correction done,    time cost: %9.2f" %(time.time()-tst) )
 
@@ -256,12 +264,17 @@ if par.down_samp_fac>1:
     n2s = int(n2/par.down_samp_fac)
     rgb_final = np.zeros([n1s, n2s, 3])
     for i in range(3):
-        buff = resample(rgb_corrected[:,:,i], n1s, axis=0)
-        buff = resample(buff, n2s, axis=1)
-        rgb_final[:,:,i] = norm_arr(buff, par.rgb_vmin, par.rgb_vmax)
+        buff = rgb_corrected[:,:,i].copy()
+        buff = buff.reshape(n1s, int(par.down_samp_fac), n2s, int(par.down_samp_fac))
+        buff = np.mean(buff, axis=1)
+        buff = np.mean(buff, axis=2)
+        rgb_final[:,:,i] = buff
 else:
     rgb_final = rgb_corrected.copy()
 
+# adjust RGB by the scaling factor
+for i in range(3):
+    rgb_final[:,:,i] = rgb_final[:,:,i]*par.scaling_fac[i]
 
 # save the 48-bit color image
 imageio.imsave(file_tif, rgb_final.astype(par.raw_data_type))

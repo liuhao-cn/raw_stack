@@ -16,29 +16,29 @@ vc1 = 1.0
 hc0 = 0.0
 hc1 = 1.0
 
-down_samp_fac = 1.0
+down_samp_fac = 2
 rgb_nbins     = 8192
-gamma         = [3, 3, 3]
+gamma         = [8, 8, 8]
 gauss_sigma   = 0.0
 
 # cut very low and very high values at a given percentage, only for the
 # case without histogram equalization.
-edge_cut0     = [0.05, 0.05, 0.05]
-edge_cut1     = [0.95, 0.95, 0.95]
+edge_cut0     = [0.10, 0.10, 0.10]
+edge_cut1     = [0.99, 0.99, 0.99]
 
 # scale the color channels with given factors, only for the case without
 # histogram equalization.
-scaling_fac   = [40.00, 40.00, 40.00]
+scaling_fac   = [1.00, 0.45, 0.70]
 
-parallel     = False
+parallel     = True
 console_mode = True
 
-# the stack mode can be color, LHSO, HSO, LRGB, RGB
+# the stack mode can be color, LHSO, HSO, LSHO, SHO, LRGB, RGB
 stack_mode = 'HSO'
 hist_eq = True
 
 # pattern (prefix) of the channel name
-chn_pattern = '_Bin2_'
+chn_pattern = '_294MM_'
 
 raw_data_type   = np.uint16
 

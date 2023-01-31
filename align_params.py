@@ -90,15 +90,15 @@ flat_suffix = '-flat.fits'
 
 # time for the light and dark frames. The scaling factor of the dark frame is
 # frame time/ dark time
-frame_time = 300.
-dark_time = 180.
+frame_time = 2000.
+dark_time =  2400.
 
 bias_file = '/home/hao/astro/bias-dark-flat/294mm-pro-bin2/bias-master.fits'
 dark_file = '/home/hao/astro/bias-dark-flat/294mm-pro-bin2/dark-master.fits'
-dir_flat  = '/home/hao/astro/bias-dark-flat'
+dir_flat  = '/home/hao/astro/2023-01-30/Flat'
 
 flat_channels = 'HSOLRGB'
-chn_pattern   = '_Bin2_'
+chn_pattern   = '_294MM_'
 
 # number of processes to be used, 0 means auto detect.
 nproc_setting = 0
