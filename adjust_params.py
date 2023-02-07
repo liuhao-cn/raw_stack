@@ -26,15 +26,18 @@ gauss_sigma   = 0.0
 edge_cut0     = [0.10, 0.10, 0.10]
 edge_cut1     = [0.99, 0.99, 0.99]
 
+# the LRGB combination factor, also applied to LHSO
+rgb_fac = [1.0, 1.0, 1.4]
+
 # scale the color channels with given factors, only for the case without
 # histogram equalization.
-scaling_fac   = [1.00, 0.45, 0.70]
+scaling_fac   = [1.00, 1.00, 1.00]
 
 parallel     = True
 console_mode = True
 
 # the stack mode can be color, LHSO, HSO, LSHO, SHO, LRGB, RGB
-stack_mode = 'HSO'
+stack_mode = 'RGB'
 hist_eq = True
 
 # pattern (prefix) of the channel name

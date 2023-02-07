@@ -43,20 +43,39 @@ def ave_by_channel(channel):
     print('Number of files for channel %6s: %5i' %(channel, i))
 
     if i==0:
-        return 0
+        return np.zeros([1])
     else:
         frame = frame/i
         return frame
 
 
 def comb_channels(r, g, b, l=None):
-    shape = g.shape
+    # check the frame shape, note that one channel could be zero
+    if r.size>1:
+        shape = r.shape
+    if g.size>1:
+        shape = g.shape
+    if b.size>1:
+        shape = b.shape
+
     n1, n2 = shape[0], shape[1]
     frame = np.zeros([n1, n2, 3])
-    if len(np.shape(l)) != 0:
-        frame[:,:,0] = r*1./(r+g+b)*l 
-        frame[:,:,1] = g*1./(r+g+b)*l
-        frame[:,:,2] = b*1./(r+g+b)*l
+
+    if r.size==1:
+        r = np.zeros([n1, n2])
+    if g.size==1:
+        g = np.zeros([n1, n2])
+    if b.size==1:
+        b = np.zeros([n1, n2])
+
+    if l != None:
+        r = ndimage.gaussian_filter(r*1., sigma=3)
+        g = ndimage.gaussian_filter(g*1., sigma=3)
+        b = ndimage.gaussian_filter(b*1., sigma=3)
+        a1, a2, a3 = par.rgb_fac[0], par.rgb_fac[1], par.rgb_fac[2]
+        frame[:,:,0] = r*a1/(r*a1 + g*a2 + b*a3) * l 
+        frame[:,:,1] = g*a2/(r*a1 + g*a2 + b*a3) * l
+        frame[:,:,2] = b*a3/(r*a1 + g*a2 + b*a3) * l
     else:
         frame[:,:,0] = r 
         frame[:,:,1] = g
