@@ -25,29 +25,54 @@ def read_channel_name(filename):
     return chn_name
 
 
+def get_ilc(frames):
+    frames = np.array(frames)
+    shape = frames.shape
+    frames = np.reshape(frames, [shape[0], shape[1]*shape[2]])
+    cov = np.cov(frames)
+    for i in range(shape[0]):
+        cov[i,i] = cov[i,i] * par.ilc_diag_fac
+    cov_inv = np.linalg.inv(cov)
+    w = np.sum(cov_inv, axis=0) / np.sum(cov_inv)
+    frame = np.dot(w.transpose(), frames).reshape([shape[1], shape[2]])
+    return frame
+
+
+
 # read frames with the given channel and return the average.
-def ave_by_channel(channel):
+def ave_by_channel(channel, ilc=False):
     i = 0
-    frame = 0
+    if ilc==True:
+        frames = []
+    else:
+        frame = 0
     for file in os.listdir(par.working_dir):
         if file.endswith(par.extension):
             file = os.path.join(par.working_dir, file)
             if channel != '':
                 chn_name = read_channel_name(file)
                 if chn_name.lower()==channel.lower():
-                    frame = frame + read_fits(file)*1.
+                    if ilc==True:
+                        frames.append(read_fits(file)*1.)
+                    else:
+                        frame = frame + read_fits(file)*1.
                     i = i+1
             else:
-                frame = frame + read_fits(file)*1.
+                if ilc==True:
+                    frames.append(read_fits(file)*1.)
+                else:
+                    frame = frame + read_fits(file)*1.
                 i = i+1
     print('Number of files for channel %6s: %5i' %(channel, i))
 
     if i==0:
         return np.zeros([1])
     else:
-        frame = frame/i
+        if ilc==True:
+            frame = get_ilc(frames)
+        else:
+            frame = frame/i
         return frame
-
 
 def comb_channels(r, g, b, l=None):
     # check the frame shape, note that one channel could be zero
@@ -75,13 +100,8 @@ def comb_channels(r, g, b, l=None):
         # make the L-channel by inverse-noise weighting
         l1  = l.copy()
         l2  = (r*a1 + g*a2 + b*a3)/(a1+a2+a3)*3
-        s11 = np.sum((l1-np.mean(l1))**2)
-        s22 = np.sum((l2-np.mean(l2))**2)
-        s12 = np.sum((l1-np.mean(l1))*(l2-np.mean(l2)))
-        w1  = (s22-s12)/(s11+s22-2*s12)
-        w2  = (s11-s12)/(s11+s22-2*s12)
-        print('Weights for L and L_RGB are %9.3f and %9.3f' %(w1, w2))
-        l = (l1*w1 + l1*w2)/(w1+w2)
+        # l = get_ilc([l1, l2])
+        l = (l1 + l2)/2
         # make the color information with smoothed RGBs
         r = ndimage.gaussian_filter(r*1., sigma=3)
         g = ndimage.gaussian_filter(g*1., sigma=3)
@@ -197,13 +217,13 @@ print("Vertical range     = %s - %s" %(par.vc0, par.vc1))
 if par.stack_mode.lower() == 'color':
     frame_stacked = ave_by_channel('')
 else:
-    chn_L = ave_by_channel('L')
-    chn_R = ave_by_channel('R')
-    chn_G = ave_by_channel('G')
-    chn_B = ave_by_channel('B')
-    chn_H = ave_by_channel('H')
-    chn_S = ave_by_channel('S')
-    chn_O = ave_by_channel('O')
+    chn_L = ave_by_channel('L', ilc=par.ave_with_ilc)
+    chn_R = ave_by_channel('R', ilc=par.ave_with_ilc)
+    chn_G = ave_by_channel('G', ilc=par.ave_with_ilc)
+    chn_B = ave_by_channel('B', ilc=par.ave_with_ilc)
+    chn_H = ave_by_channel('H', ilc=par.ave_with_ilc)
+    chn_S = ave_by_channel('S', ilc=par.ave_with_ilc)
+    chn_O = ave_by_channel('O', ilc=par.ave_with_ilc)
     if   par.stack_mode.upper() == 'LRGB':    
         frame_stacked = comb_channels(chn_R, chn_G, chn_B, l=chn_L)
     elif par.stack_mode.upper() == 'LHSO':

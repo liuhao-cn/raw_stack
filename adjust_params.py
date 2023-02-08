@@ -33,6 +33,11 @@ rgb_fac = [1.0, 1.2, 1.4]
 # histogram equalization.
 scaling_fac   = [1.00, 1.00, 1.00]
 
+# average the frames with ILC?
+# ilc_diag_fac means to amplify the diagonal factor for stablization
+ave_with_ilc = True
+ilc_diag_fac = 1.1
+
 parallel     = True
 console_mode = True
 
