@@ -69,13 +69,19 @@ def comb_channels(r, g, b, l=None):
     if b.size==1:
         b = np.zeros([n1, n2])
 
-    if l != None:
+    if len(np.shape(l)) != 0:
         # read the rgb relative weights
         a1, a2, a3 = par.rgb_fac[0], par.rgb_fac[1], par.rgb_fac[2]
         # make the L-channel by inverse-noise weighting
-        l1 = (r*a1 + g*a2 + b*a3)/(a1+a2+a3)
-        w0, w1 = 1./np.var(l), 1d/np.var(l1)
-        l = (l*w0 + l1*w1)/(w0+w1)
+        l1  = l.copy()
+        l2  = (r*a1 + g*a2 + b*a3)/(a1+a2+a3)*3
+        s11 = np.sum((l1-np.mean(l1))**2)
+        s22 = np.sum((l2-np.mean(l2))**2)
+        s12 = np.sum((l1-np.mean(l1))*(l2-np.mean(l2)))
+        w1  = (s22-s12)/(s11+s22-2*s12)
+        w2  = (s11-s12)/(s11+s22-2*s12)
+        print('Weights for L and L_RGB are %9.3f and %9.3f' %(w1, w2))
+        l = (l1*w1 + l1*w2)/(w1+w2)
         # make the color information with smoothed RGBs
         r = ndimage.gaussian_filter(r*1., sigma=3)
         g = ndimage.gaussian_filter(g*1., sigma=3)
