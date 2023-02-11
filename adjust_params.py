@@ -18,8 +18,8 @@ hc1 = 1.0
 
 down_samp_fac = 2
 rgb_nbins     = 8192
-gamma         = [8, 8, 8]
-gauss_sigma   = 0.0
+gamma         = [6, 6, 6]
+gauss_sigma   = 1
 
 # cut very low and very high values at a given percentage, only for the
 # case without histogram equalization.
@@ -27,14 +27,14 @@ edge_cut0     = [0.10, 0.10, 0.10]
 edge_cut1     = [0.99, 0.99, 0.99]
 
 # the LRGB combination factor, also applied to LHSO
-rgb_fac = [1.0, 1.2, 1.4]
+rgb_fac = [1.0, 1.0, 1.4]
 
 # scale the color channels with given factors, only for the case without
 # histogram equalization.
-scaling_fac   = [1.00, 1.00, 1.00]
+scaling_fac   = [1.00, 0.80, 0.80]
 
 # average the frames with ILC?
-# ilc_diag_fac means to amplify the diagonal factor for stablization
+# ilc_diag_fac means to amplify the diagonal factor for stabilization
 ave_with_ilc = True
 ilc_diag_fac = 1.1
 
@@ -42,8 +42,12 @@ parallel     = True
 console_mode = True
 
 # the stack mode can be color, LHSO, HSO, LSHO, SHO, LRGB, RGB
-stack_mode = 'LRGB'
+stack_mode = 'HSO'
 hist_eq = True
+
+# Use naive wiener filter to reduce the noise?
+wiener_filter = False
+wiener_noise_fac = 0.3
 
 # pattern (prefix) of the channel name
 chn_pattern = '_294MM_'

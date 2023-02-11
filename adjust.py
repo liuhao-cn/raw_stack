@@ -7,11 +7,10 @@ import astropy.io.fits as fits
 import matplotlib.pyplot as plt
 import adjust_params as par
 
-from scipy import ndimage
+from scipy import ndimage, fft
 from scipy.signal import resample
 from scipy.stats import linregress
 from multiprocessing.managers import SharedMemoryManager
-
 
 
  # parse the channel names
@@ -36,6 +35,30 @@ def get_ilc(frames):
     w = np.sum(cov_inv, axis=0) / np.sum(cov_inv)
     frame = np.dot(w.transpose(), frames).reshape([shape[1], shape[2]])
     return frame
+
+
+def get_pos_r(array, r, nbins):
+    buff = array.flatten()
+    hist, bins = np.histogram(buff, nbins, density=True)
+    cdf = hist.cumsum()
+    cdf = cdf/np.amax(cdf)
+    val = bins[np.argmin(np.abs(cdf-r))]
+    return val
+
+
+# as a naive method, the noise level is defined as the 0.1% level of the
+# FFT-power by default.
+def naive_wiener_filter(frame, noise_fac=0.001):
+    pow_norm_fac = 0.1
+    frame_fft = fft.fft2(frame)
+    frame_fft_pow_sqrt = np.abs(frame_fft*np.conj(frame_fft))**pow_norm_fac
+    noise_level = get_pos_r(frame_fft_pow_sqrt, noise_fac, par.rgb_nbins)
+    pow_now = 1./pow_norm_fac 
+    fac = (frame_fft_pow_sqrt**pow_now - noise_level**pow_now)/frame_fft_pow_sqrt**pow_now
+    fac[fac<0] = 0
+    frame_fft = frame_fft*fac
+    frame1 = np.abs(fft.ifft2(frame_fft))
+    return frame1
 
 
 
@@ -100,8 +123,10 @@ def comb_channels(r, g, b, l=None):
         # make the L-channel by inverse-noise weighting
         l1  = l.copy()
         l2  = (r*a1 + g*a2 + b*a3)/(a1+a2+a3)*3
-        # l = get_ilc([l1, l2])
-        l = (l1 + l2)/2
+        if par.ave_with_ilc==True:
+            l = get_ilc([l1, l2])
+        else:
+            l = (l1 + l2)/2
         # make the color information with smoothed RGBs
         r = ndimage.gaussian_filter(r*1., sigma=3)
         g = ndimage.gaussian_filter(g*1., sigma=3)
@@ -151,14 +176,10 @@ def hist_equal_gamma(i):
 # cut the edge values, do scaling, and modify the gamma values.
 def cut_and_gamma(i):
     global rgb, rgb_corrected
-    # get image histogram
     array = rgb[:,:,i].flatten()
-    hist, bins = np.histogram(array, par.rgb_nbins, density=True)
-    cdf = hist.cumsum()
-    cdf = cdf/np.amax(cdf)
     # find the edge values
-    vv0 = bins[np.argmin(np.abs(cdf-par.edge_cut0[i]))]
-    vv1 = bins[np.argmin(np.abs(cdf-par.edge_cut1[i]))]
+    vv0 = get_pos_r(array, par.edge_cut0[i], par.rgb_nbins)
+    vv1 = get_pos_r(array, par.edge_cut1[i], par.rgb_nbins)
     # normalize the array to 0~1
     upper_lim = (vv1 - vv0)*1.
     array = (array - vv0)/upper_lim
@@ -310,6 +331,9 @@ if par.hori_inv==True:
 if par.vert_inv==True:
     rgb_corrected = np.flip(rgb_corrected, axis=0)
 
+if par.wiener_filter==True:
+    for i in range(3):
+        rgb_corrected[:,:,i] = naive_wiener_filter(rgb_corrected[:,:,i], noise_fac=par.wiener_noise_fac)
 
 # Down-sampling
 if par.down_samp_fac>1:
