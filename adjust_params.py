@@ -6,7 +6,6 @@ extension    = 'fit'
 
 rgb_vmin     = 0
 rgb_vmax     = 65535
-bayer_string = 'BGGR'
 
 hori_inv = False
 vert_inv = False
@@ -19,19 +18,18 @@ hc1 = 1.0
 down_samp_fac = 2
 rgb_nbins     = 8192
 gamma         = [6, 6, 6]
-gauss_sigma   = 1
+gauss_sigma   = [0.5, 0.5, 0.5]
 
 # cut very low and very high values at a given percentage, only for the
 # case without histogram equalization.
 edge_cut0     = [0.10, 0.10, 0.10]
 edge_cut1     = [0.99, 0.99, 0.99]
 
-# the LRGB combination factor, also applied to LHSO
-rgb_fac = [1.0, 1.0, 1.4]
+# prior (physical) RGB combination factor, also applied to HSO
+rgb_fac = [1.0, 1.0, 1.0]
 
-# scale the color channels with given factors, only for the case without
-# histogram equalization.
-scaling_fac   = [1.00, 0.80, 0.80]
+# posterior (final, visual) scaling factors of the RGB color channels.
+scaling_fac   = [1.00, 1.00, 0.95]
 
 # average the frames with ILC?
 # ilc_diag_fac means to amplify the diagonal factor for stabilization
@@ -54,6 +52,7 @@ chn_pattern = '_294MM_'
 
 raw_data_type   = np.uint16
 
+bayer_string = 'BGGR'
 if bayer_string.lower()=="rggb":
     bayer_matrix_format = cv2.COLOR_BayerRG2RGB
 elif bayer_string.lower()=="bggr":

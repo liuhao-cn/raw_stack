@@ -117,12 +117,15 @@ def comb_channels(r, g, b, l=None):
     if b.size==1:
         b = np.zeros([n1, n2])
 
+    # read the rgb relative weights
+    a1, a2, a3 = par.rgb_fac[0], par.rgb_fac[1], par.rgb_fac[2]
+    af = (a1+a2+a3)/3.
+    a1, a2, a3 = a1/af, a2/af, a3/af
+
     if len(np.shape(l)) != 0:
-        # read the rgb relative weights
-        a1, a2, a3 = par.rgb_fac[0], par.rgb_fac[1], par.rgb_fac[2]
         # make the L-channel by inverse-noise weighting
         l1  = l.copy()
-        l2  = (r*a1 + g*a2 + b*a3)/(a1+a2+a3)*3
+        l2  = r*a1 + g*a2 + b*a3
         if par.ave_with_ilc==True:
             l = get_ilc([l1, l2])
         else:
@@ -136,9 +139,9 @@ def comb_channels(r, g, b, l=None):
         frame[:,:,1] = g*a2/(r*a1 + g*a2 + b*a3) * l
         frame[:,:,2] = b*a3/(r*a1 + g*a2 + b*a3) * l
     else:
-        frame[:,:,0] = r 
-        frame[:,:,1] = g
-        frame[:,:,2] = b
+        frame[:,:,0] = r*a1 
+        frame[:,:,1] = g*a2
+        frame[:,:,2] = b*a3
     return frame
 
 
@@ -159,10 +162,10 @@ def hist_equal_gamma(i):
     bins = bins[0:par.rgb_nbins-1]
     cdf = hist.cumsum()
     cdf = cdf/np.amax(cdf)
-    # find the edge values
-    vv0 = bins[np.argmin(np.abs(cdf-par.edge_cut0[i]))]
-    vv1 = bins[np.argmin(np.abs(cdf-par.edge_cut1[i]))]
-    bins[bins<vv0] = vv0
+    # # find the edge values
+    # vv0 = bins[np.argmin(np.abs(cdf-par.edge_cut0[i]))]
+    # vv1 = bins[np.argmin(np.abs(cdf-par.edge_cut1[i]))]
+    # bins[bins<vv0] = vv0
     # use linear interpolation of cdf to find new pixel values
     array = np.interp(array, bins, cdf)
     if par.gamma[i] != 1:
@@ -224,15 +227,22 @@ horizontal_clip = [par.hc0, par.hc1]
 gamma_str = str(par.gamma[0]).format("4.4i")+'-'+str(par.gamma[1]).format("4.4i")+'-'+str(par.gamma[2]).format("4.4i")
 file_tif  = os.path.join(par.working_dir, "final_gamma"+gamma_str+".tiff")
 
-print("Working directory  = %s"      %(par.working_dir))
-print("Gamma              = %s"      %(par.gamma))
-print("Parallel           = %s"      %(par.parallel))
-print("Hist-equalization  = %s"      %(par.hist_eq))
-print("Stack color mode   = %s"      %(par.stack_mode))
-print("Horizontal reverse = %s"      %(par.hori_inv))
-print("Vertical reverse   = %s"      %(par.vert_inv))
-print("Horizontal range   = %s - %s" %(par.hc0, par.hc1))
-print("Vertical range     = %s - %s" %(par.vc0, par.vc1))
+
+
+print("Parallel                = %s"          %(par.parallel))
+print("Hist-equalization       = %s"          %(par.hist_eq))
+print("Stack with ILC          = %s"          %(par.ave_with_ilc))
+print("Horizontal reverse      = %s"          %(par.hori_inv))
+print("Vertical reverse        = %s"          %(par.vert_inv))
+print("Working directory       = %s"          %(par.working_dir))
+print("Gamma                   = %s"          %(par.gamma))
+print("Stack color mode        = %s"          %(par.stack_mode))
+print("Down-sample             = %s"          %(par.down_samp_fac))
+print("Gaussian smoothing      = %s, %s, %s"  %(par.gauss_sigma[0], par.gauss_sigma[1], par.gauss_sigma[2]))
+print("RGB weights (prior)     = %s, %s, %s"  %(par.rgb_fac[0], par.rgb_fac[1], par.rgb_fac[2]))
+print("RGB weights (posterior) = %s, %s, %s"  %(par.scaling_fac[0], par.scaling_fac[1], par.scaling_fac[2]))
+print("Horizontal range        = %s - %s"     %(par.hc0, par.hc1))
+print("Vertical range          = %s - %s"     %(par.vc0, par.vc1))
 
 # read the stacked frame and make sure the values are all positive
 if par.stack_mode.lower() == 'color':
@@ -320,10 +330,10 @@ print("Color correction done,    time cost: %9.2f" %(time.time()-tst) )
 
 
 # Gaussian smoothing
-if par.gauss_sigma != 0:
-    print("Running %s pixel Gaussian smoothing" %(par.gauss_sigma))
-    for i in range(3):
-        rgb_corrected[:,:,i] = ndimage.gaussian_filter(rgb_corrected[:,:,i], sigma=par.gauss_sigma)
+for i in range(3):
+    if par.gauss_sigma[i] > 0:
+        print("Running %s pixel Gaussian smoothing for channel %3i" %(par.gauss_sigma[i], i))
+        rgb_corrected[:,:,i] = ndimage.gaussian_filter(rgb_corrected[:,:,i], sigma=par.gauss_sigma[i])
 
 # Horizontal or vertial inverting
 if par.hori_inv==True:
