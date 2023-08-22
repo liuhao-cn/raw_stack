@@ -108,10 +108,10 @@ def rescale(frame, e0=0.05, e1=0.95):
     array[array>1] = 1
     return array
     
-def show_frame(frame, fig, gs, row_id, col_id0, col_id1, title, e0=0.05, e1=0.95, color=False):
+def show_frame(frame, fig, gs, row_id0, row_id1, col_id0, col_id1, title, e0=0.05, e1=0.95, color=False):
     cache = rescale(frame, e0=e0, e1=e1)
 
-    ax = fig.add_subplot(gs[row_id, col_id0:col_id1])
+    ax = fig.add_subplot(gs[row_id0:row_id1, col_id0:col_id1])
 
     ax.tick_params(labelbottom=False, labelleft=False)
 
@@ -129,7 +129,7 @@ def show_frame(frame, fig, gs, row_id, col_id0, col_id1, title, e0=0.05, e1=0.95
 # dark   = ave_frame(dir_main+'dark/', dir_main+'dark-master.fits')
 
 # make flat frame
-working_dir = 'D:/astro/raw/2023-01-28/'
+working_dir = 'D:/astro/raw/2023-01-30/'
 
 L_flat = ave_by_channel(working_dir+'Flat/', 'L', working_dir+'L-flat.fits')
 R_flat = ave_by_channel(working_dir+'Flat/', 'R', working_dir+'R-flat.fits')
@@ -139,18 +139,18 @@ H_flat = ave_by_channel(working_dir+'Flat/', 'H', working_dir+'H-flat.fits')
 S_flat = ave_by_channel(working_dir+'Flat/', 'S', working_dir+'S-flat.fits')
 O_flat = ave_by_channel(working_dir+'Flat/', 'O', working_dir+'O-flat.fits')
 
-fig = plt.figure(layout="tight", figsize=(16,8))
+fig = plt.figure(layout="tight", figsize=(12,6))
 fig.suptitle("Flat")
 
 from matplotlib.gridspec import GridSpec
-gs = GridSpec(2, 12, figure=fig)
+gs = GridSpec(7, 12, figure=fig)
 
-show_frame(L_flat, fig, gs, 0, 0,  2, 'L-flat')
-show_frame(R_flat, fig, gs, 0, 3,  5, 'R-flat')
-show_frame(G_flat, fig, gs, 0, 6,  8, 'G-flat')
-show_frame(B_flat, fig, gs, 0, 9, 11, 'B-flat')
-show_frame(H_flat, fig, gs, 1, 0,  3, 'H-flat')
-show_frame(S_flat, fig, gs, 1, 4,  7, 'S-flat')
-show_frame(O_flat, fig, gs, 1, 8, 11, 'O-flat')
+show_frame(L_flat, fig, gs, 0, 2, 0, 2, 'L-flat')
+show_frame(R_flat, fig, gs, 0, 2, 3, 5, 'R-flat')
+show_frame(G_flat, fig, gs, 0, 2, 6, 8, 'G-flat')
+show_frame(B_flat, fig, gs, 0, 2, 9,11, 'B-flat')
+show_frame(H_flat, fig, gs, 3, 6, 0, 3, 'H-flat')
+show_frame(S_flat, fig, gs, 3, 6, 4, 7, 'S-flat')
+show_frame(O_flat, fig, gs, 3, 6, 8,11, 'O-flat')
 
 plt.show()
